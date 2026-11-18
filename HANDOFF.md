@@ -69,9 +69,9 @@ See CLAUDE.md §0–§13. In short:
 |---|---|
 | `app/api/answer/route.ts` | Board analysis prompt and schema, sanitizing by answer kind |
 | `app/api/create/route.ts` | Ask/Photo → note or diagram prompt and schema |
-| `app/demo/page.tsx` | Demo gallery; "Try it" → `/?demo=<id>` |
+| `app/examples/page.tsx` | Examples gallery; "Try it" → `/?example=<id>` |
 | `app/layout.tsx`, `app/globals.css` | Theme boot script, CSS variables (light/dark) |
-| `components/Whiteboard.tsx` | Main component: input, tools, analysis, undo, demos, settings wiring |
+| `components/Whiteboard.tsx` | Main component: input, tools, analysis, undo, examples, settings wiring |
 | `components/AnswerOverlay.tsx` | Answers/cards/typed text rendering, placement, renderers |
 | `components/Draggable.tsx` | Select / drag / delete wrapper (optional top-strip handle) |
 | `components/Composer.tsx` | Ask box (with photo preview) |
@@ -88,4 +88,4 @@ See CLAUDE.md §0–§13. In short:
 | `lib/glyphs.ts`, `lib/settings.ts` | Glyph sets and drawing; settings and user glyph storage |
 | `lib/ink.ts` | perfect-freehand strokes, eraser hit test |
 | `lib/check.ts` | Local practice-answer checker |
-| `lib/demos.ts`, `lib/photo.ts`, `lib/texts.ts`, `lib/measure.ts`, `lib/storage.ts`, `lib/theme.ts`, `lib/config.ts`, `lib/types.ts` | Helpers and data |
+| `lib/examples.ts`, `lib/shapes.ts`, `lib/photo.ts`, `lib/texts.ts`, `lib/measure.ts`, `lib/storage.ts`, `lib/theme.ts`, `lib/config.ts`, `lib/types.ts` | Helpers and data |
