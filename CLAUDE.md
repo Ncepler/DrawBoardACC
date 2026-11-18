@@ -8,9 +8,9 @@ Owner: Noah Cepler (student, builds web projects on Next.js / Tailwind / Supabas
 
 ## 0. One-paragraph summary
 
-A whiteboard app you draw on with an Apple Pencil or your finger. When you stop drawing for a moment, the app takes a picture of the board, sends it to the Gemini API, and Gemini looks for any question mark you drew. If you drew a "?" where you forgot what something is called, the app writes a very short answer next to it. In this mockup the answer is plain text. In a later phase the answer is written in the user's own handwriting. The first target user is a student who diagrams a whole unit on a board and gets stuck on terms.
+A whiteboard app you draw (or type) on with an Apple Pencil, finger, or mouse. When you tap **Analyze**, the app takes a picture of the board, sends it to the Gemini API, and Gemini decides what you want answered: a math problem to solve, a question or "Explain X" to explain, a blank or "?" in a diagram to name, or your own wrong answer to correct. No question mark is required. Answers appear next to what they answer: numbers and simple math are drawn as pen strokes (in your own handwriting if you set it up), terms show as short text, explanations as a small card. You can also ask for content (an **Ask** box: "diagram of photosynthesis with 4 blanks") or turn a **photo** into a diagram; practice diagrams with numbered blanks can be filled in by pen or by typing and checked. The first target user is a student who diagrams a whole unit on a board and gets stuck on terms.
 
-This repo is a MOCKUP to answer one question: does the "?" fill-in loop feel genuinely useful? It is not the final product and it is not a Miro competitor.
+This repo is still a MOCKUP to answer one question: is the board-that-answers-you loop genuinely useful? It is not the final product and it is not a Miro competitor.
 
 ---
 
@@ -22,19 +22,21 @@ The idea: draw a "?" right where the gap is, keep going, and the answer shows up
 
 ---
 
-## 2. The core loop (this is the whole product right now)
+## 2. The core loop
 
-1. User draws on the canvas.
-2. User stops drawing for about 2.5 seconds (the idle delay is one named constant).
-3. The app exports the INK canvas as a PNG and POSTs it to a server route.
-4. The route sends the image to the Gemini API, which finds question marks the user drew and returns a very short answer for each, plus where each "?" is.
-5. The app shows each answer as small text next to its "?".
+1. The student draws (pen strokes) and/or types (Text tool) on the board.
+2. The student taps **Analyze** (or presses Enter on a keyboard). Automatic analysis after a pause is optional (Settings → "Analyze automatically when I pause", idle delay is one named constant, 2500 ms); it is OFF by default to save API quota.
+3. The app exports the student's content as a PNG: ink strokes, typed text, and any practice diagrams (drawn gray). Never AI answers or AI notes.
+4. `/api/answer` sends the image to Gemini, which returns items: what it read, what kind of response (math / term / explain / check), the answer, a confidence, and the box of what it answers.
+5. Each answer is shown next to what it answers, on the overlay layer.
 
-Everything else in the app exists to support this loop. If a feature does not serve this loop or the drawing feel, it is out of scope for the mockup.
+Second loop (creation): Ask box or Photo → `/api/create` → Gemini returns a note or a diagram (nodes + edges + optional numbered blanks) → the app lays it out and places it on the board as a draggable card.
+
+Everything else in the app exists to support these loops or the drawing feel.
 
 ---
 
-## 3. Product vision (context only — do NOT build any of this yet)
+## 3. Product vision
 
 Three ways Noah has thought about selling it:
 1. A full whiteboard with the AI built in (hardware).
@@ -43,11 +45,11 @@ Three ways Noah has thought about selling it:
 
 Noah's own priority order is software first. Hardware is far-future and depends on the software proving itself. Do not design, name, or stub anything for hardware.
 
-Planned phases:
-1. This mockup: text answers, "?" detection, boards, Apple-feel ink.
-2. Answers written back in the user's own handwriting.
-3. Practice mode: the app draws a diagram with blanks, the user fills them in, the app checks them.
-4. Upload a photo of a real physical whiteboard and process it the same way.
+Phases and where they stand:
+1. Mockup loop: answers on the board, boards, Apple-feel ink. **Built.**
+2. Answers in the user's own handwriting. **Started:** per-character handwriting capture in Settings; answers whose characters all have glyphs are drawn with them. Not yet: connected cursive, natural spacing/jitter, learning from normal writing.
+3. Practice mode: diagrams with blanks, the user fills them in, the app checks them. **Built (first version):** Ask for "… with N blanks"; fill by pen (checked by Gemini via Analyze) or by typing (checked locally by "Check answers").
+4. Photo of a real whiteboard / textbook figure. **Built (first version):** Photo button → diagram or note.
 5. Possibly: iPad-optimized app, then hardware.
 
 ---
@@ -79,18 +81,21 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 
 ## 5. Scope of this repo
 
-### In scope (the mockup)
-- Full-screen whiteboard canvas with Apple-feel ink using Apple Pencil or finger.
-- Left sidebar with boards (Board 1, Board 2, ...), add-board button, and a toggle that shows/hides the sidebar.
-- Minimal floating toolbar: pen, eraser, undo.
-- Idle detection, screenshot of the ink layer, server route calling Gemini, short text answers rendered next to each "?".
-- Boards persisted in localStorage.
-- Light mode, Apple-like visual design.
+### In scope (built)
+- Full-screen whiteboard canvas with Apple-feel ink using Apple Pencil, finger, or mouse.
+- Left sidebar with boards (Board 1, Board 2, ...), add-board button, Demos link, show/hide toggle.
+- Floating toolbar: pen, eraser, undo | Text (T), Ask, Photo | Analyze.
+- Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause".
+- Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
+- Ask box and Photo → AI notes and diagrams (cycle / flow / tree layouts, optional numbered practice blanks).
+- Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".
+- Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable.
+- `/demo` page with ready-made demo boards.
+- Boards, settings, and handwriting glyphs persisted in localStorage.
 
 ### Out of scope (do not build, do not stub)
-- Handwriting-style answers or any handwriting font.
-- Practice mode, photo upload, accounts/login, database, sharing, collaboration, export, color picker, shapes, text tool, images, zoom/pan canvas (unless needed for correctness), dark mode, hardware anything.
-- Any deploy or Vercel configuration changes (Noah handles deploys).
+- Accounts/login, database, sharing, collaboration, export, color picker, shapes, images other than the photo-to-diagram flow, zoom/pan canvas (unless needed for correctness), hardware anything.
+- Any deploy or Vercel configuration changes unless Noah asks (Noah handles deploys and merges).
 
 ---
 
@@ -98,17 +103,20 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 
 | Decision | Why |
 |---|---|
-| Answers are plain TEXT in this mockup | Handwriting is a later phase; text tests the loop just as well |
-| Answers are very, very short: a term or a few words, hard cap 6 words, enforced in the Gemini instruction AND truncated in code | Must fit in the space next to a "?", and short answers are easy to verify. Noah explicitly does not want paragraphs |
-| Gemini API analyzes a screenshot of the board | Noah's choice of model provider for this mockup |
-| Trigger = no drawing activity for a few seconds | Mirrors how a person pauses and wonders |
-| Drawing must feel like Apple's ink (Notes/Freeform) | Pen feel is a top priority, researched before building |
-| Apple Pencil AND finger both draw | Stated requirement |
-| Left sidebar with toggle and Board 1, Board 2, etc. | Stated requirement |
+| Analysis is manual (Analyze button / Enter); auto-on-pause is an opt-in setting, default off | Saves Gemini quota; Noah asked for a button |
+| No question mark required: Gemini decides what to respond to | Noah's request; a "?" still works |
+| Answer kinds with caps: math ≤10 words, term ≤6 words, explain ≤60 words (2–3 sentences), check ≤8 words; enforced in the Gemini instruction AND in code | Short where it must fit beside the work; explanations when asked ("Krebs cycle:?", "Explain X") |
+| Math answers are plain text, never LaTeX; "=" is added when the student didn't write one | Raw `\frac{}` was showing; "2500+10" should read "= 2510" |
+| Numbers/simple math are drawn as pen strokes; other answers as text; explanations as a card | Noah's request ("drawn on, start with numbers") |
+| Handwriting: user writes each character once in Settings; glyphs behind a `GlyphSet` interface | Phase 2 starting point; renderer swappable |
+| Gemini analyzes a screenshot of the board | Noah's choice of model provider |
+| Drawing must feel like Apple's ink (Notes/Freeform) | Pen feel is a top priority |
+| Apple Pencil, finger and mouse all draw | Stated requirement |
 | Ink stored as vector strokes, not pixels | Crisp at any size, erasable by stroke, re-exportable |
-| Overlay layer separate from ink layer; only ink is sent to Gemini | Otherwise Gemini sees its own previous answers |
-| Wrong answers are worse than no answer: Gemini returns a confidence, low-confidence answers show visibly muted | Study tool correctness (see section 12) |
-| Light mode only, Apple-like look | Scope control |
+| AI answers and AI notes are never in the image sent to Gemini; practice diagrams ARE (in gray) | Gemini must not read its own answers, but must see the practice sheet to check filled blanks |
+| Typed practice answers are checked locally (strict on numbers, forgiving on case/spacing/typos); pen-filled blanks are checked by Gemini | Instant, free, and deterministic for typed answers |
+| Wrong answers are worse than no answer: confidence returned, low confidence shown muted | Study tool correctness (see section 12) |
+| Light, dark, and system appearance | Noah's request |
 | localStorage persistence, no database | Mockup scope |
 | Gemini key server-side only | Security |
 
@@ -116,38 +124,56 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 
 ## 7. Stack, environment, deployment
 
-- Next.js (App Router), TypeScript, Tailwind. Deployed on Vercel by Noah.
-- Gemini via the official `@google/genai` SDK, called ONLY from a server route (`/api/answer`). Verify the SDK's current API and the current Flash-tier model id in the official docs before coding; put the model id in ONE constant.
-- No database. No auth.
-- Env: `GEMINI_API_KEY` in `.env.local` (gitignored), a placeholder in `.env.local.example`, and the same variable in Vercel project settings. The key must never be in client code, logs, or commits.
-- Noah develops on a MacBook in the Claude desktop app's Claude Code, but the real test device is an iPad with Apple Pencil via a Vercel preview URL. Claude Code cannot test Pencil input, so build pointer logic carefully against the research and test with a mouse; flag everything that is untestable without an iPad.
+- Next.js 16 (App Router, `cacheComponents` on: route segment config like `runtime` is not allowed), React 19, TypeScript, Tailwind v4. Read `node_modules/next/dist/docs/` before using Next APIs (see AGENTS.md).
+- `perfect-freehand` for stroke outlines; `@google/genai` for Gemini. No other runtime dependencies.
+- Gemini is called ONLY from server routes: `/api/answer` (board analysis) and `/api/create` (Ask box / photo). Shared server code: `lib/gemini.ts` (client, model fallback, error mapping) and `lib/server.ts` (origin check, rate limit, body cap).
+- Model ids live in ONE constant, `GEMINI_MODELS` in `lib/gemini.ts`, tried in order: `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`. A quota (429) or not-found (404) error falls through to the next. `gemini-3.8-flash` hit a 0/free-tier quota on Noah's key. SDK retries are disabled (they blew past Vercel's function timeout); per-request timeout 25 s (`/api/answer`) / 50 s (`/api/create`).
+- Env: `GEMINI_API_KEY` in Vercel (Production; add Preview to use branch previews) and in `.env.local` for local dev (gitignored; placeholder in `.env.local.example`). The key must never be in client code, logs, or commits.
+- Deploy: Vercel project `drawboardacc`, production from `main` (https://drawboardacc.vercel.app). Work happens on a feature branch, merged to `main` by PR when Noah says so. Vercel Deployment Protection (login) is on for `.vercel.app` URLs.
+- Noah tests on an iPad with Apple Pencil and on a Mac. Claude Code cannot test Pencil input: test with a mouse/Playwright and flag what needs the iPad.
 
 ---
 
 ## 8. UX spec
 
 ### Layout
-- Canvas fills the viewport (use dynamic viewport units; account for iPad Safari toolbars and safe areas). White board, near-black ink.
-- Left sidebar: translucent, blurred, rounded, Apple-style. Lists boards: "Board 1", "Board 2", ... with the active one highlighted. An add-board button creates the next numbered board. Clicking a board swaps in its strokes and answers; nothing is lost when switching.
-- A toggle button shows/hides the sidebar. When hidden the canvas takes the full width, and the toggle stays reachable (small floating button). Animate smoothly but quickly; the canvas must not stretch or lose strokes when the sidebar toggles (resize canvas buffer correctly and redraw from vectors).
-- Floating toolbar (bottom or top center, translucent): pen, eraser (erases whole strokes it touches), undo. Nothing else.
-- All tap targets at least 44px. No hover-only UI, no right-click, nothing that only works with a mouse.
+- Canvas fills the viewport (`position: fixed; inset: 0`; safe-area insets on all floating chrome). Board color and ink color follow the theme.
+- Top left: sidebar toggle (always reachable) and the translucent boards sidebar (boards, Add board, Demos). The sidebar floats over the canvas, so toggling never resizes the canvas.
+- Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, demos).
+- Bottom center toolbar: pen, eraser (whole-stroke), undo | Text (T), Ask, Photo | Analyze. Nothing else.
+- Small notices appear top center (e.g. "Nothing to answer found", "Couldn't analyze: …", "2 of 3 right").
+- All tap targets at least 44px. No hover-only UI, no right-click, nothing that only works with a mouse (keyboard shortcuts are extras: Enter = Analyze, Delete = delete selection, Escape = deselect).
+
+### Tools and items
+- **Ask**: tap the tool, tap the board where the result should go, type, Create. A "Thinking…" placeholder shows while Gemini works; the result is placed at the nearest free spot.
+- **Photo**: pick or take a photo (downscaled to ≤1600 px JPEG in the browser), optionally change the request (default "Turn this into a diagram"), Create.
+- **Text (T)**: click empty board to type (Enter saves, Shift+Enter new line); click a practice blank to type its answer; click typed text to edit. The tool stays on until another tool is picked.
+- **Items** (answers, notes, diagrams, typed text): tap selects (ring + × button), drag moves, × deletes; undo restores. Diagrams move only by the grab strip along the top, so the pen can write on the rest. A dragged answer keeps its spot across re-analysis.
+- Erasing ink near an answer (within ~1.5× its box, min 100 px), or undoing it, removes that answer immediately.
 
 ### Visual language (Apple-like)
 - Font stack: `-apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif`.
-- Near-black ink (Apple's #1d1d1f-ish), system blue for AI answers (#007AFF-ish), light neutral sidebar with backdrop blur, generous corner radius, thin hairline borders, soft shadows, minimal chrome. Restraint over decoration.
-- Answers must be clearly distinguishable from the user's ink (different color, smaller, clean sans text).
+- Theme colors are CSS variables in `app/globals.css` (`:root` and `:root.dark`, toggled by a class on `<html>`; a boot script in `<head>` applies it before first paint). Canvas colors come from `THEME` in `lib/settings.ts`.
+- AI content is system blue (#007AFF light / #0A84FF dark); the student's ink and typed text use the ink color. Low-confidence answers are muted.
 
 ### Input behavior
-- Use Pointer Events. When a pen (`pointerType === "pen"`) is active, ignore touch input from the resting palm. If only touch is present, finger draws.
-- The page must never scroll, zoom, select text, show callouts, or rubber-band while drawing on the canvas.
-- Drawing must never be blocked by network activity.
+- Pointer Events. Palm rejection: while a pen is down or was active (including hover) in the last 500 ms, touch is ignored. Two fingers cancel a finger stroke. Finger draws when no pen is in use.
+- The page never scrolls, zooms, selects text, shows callouts, or rubber-bands while drawing on the canvas.
+- Drawing is never blocked by network activity. The Ask box and text editor open on pointer LIFT with `flushSync` + `autoFocus` so iPad shows the keyboard (untested on device).
 
 ---
 
 ## 9. Ink engine spec (the part that must feel like Apple)
 
 Goal: strokes that look and feel like Apple Pencil in Notes/Freeform: smooth, no visible polyline corners, variable width driven by pressure and speed, no perceived lag, crisp at device pixel ratio.
+
+**What was built (`lib/ink.ts`, `components/Whiteboard.tsx`):**
+- **Stroke library:** `perfect-freehand` with smoothing 0.6, streamline 0.45, and round caps with no taper.
+- **Pen:** size 6, thinning 0.55, using real pressure clamped to ≥0.05 (about 1.2–4.8 px wide).
+- **Finger and mouse:** size 5, thinning 0.5, with simulated (speed-based) pressure.
+- **Events:** `getCoalescedEvents()` supplies every point. `getPredictedEvents()` points are drawn on the live layer but never stored. Both are feature-detected (Safari 18.2+).
+- **Canvases:** two of them, committed ink plus the live stroke. Each is sized by devicePixelRatio (capped at 3 and at 16M pixels) and redrawn from vectors on resize, board switch, undo and erase.
+- **Not yet checked:** none of these numbers have been tuned on an iPad.
 
 The build prompt requires a research step first (a subagent investigates Apple's PencilKit/Notes feel and the web equivalents and reports a short summary). Decisions about smoothing, width range, and pressure curve come from that research; record them in the final report. Starting hypotheses to verify, not facts to assume:
 - Variable-width smooth strokes via a freehand-stroke approach (for example the `perfect-freehand` library) are likely closer to Apple's feel than raw line segments. Evaluate before committing; if added, state it in the report.
@@ -167,93 +193,81 @@ Eraser: removes whole strokes whose geometry the eraser path intersects (stroke-
 
 ---
 
-## 10. Data model (TypeScript, guidance not gospel)
+## 10. Data model (see `lib/types.ts`)
 
 ```ts
-type Point = { x: number; y: number; p: number; t: number } // p = pressure 0..1, t = ms timestamp
+type Point = { x: number; y: number; p: number; t: number }
+type Stroke = { id; points: Point[]; tool: "pen"; width; color; real: boolean /* real pen pressure */; createdAt }
 
-type Stroke = {
-  id: string
-  points: Point[]
-  tool: "pen"            // eraser removes strokes, it is not stored as a stroke
-  width: number          // base width
-  color: string
-  createdAt: number
-}
-
+type AnswerKind = "math" | "term" | "explain" | "check"
 type Answer = {
-  id: string
-  box: { x: number; y: number; w: number; h: number } // board coordinates, derived from normalized Gemini box
-  text: string           // <= 6 words
-  confidence: "high" | "low"
-  createdAt: number
+  id; box: { x; y; w; h }      // board coords of what it answers (from Gemini's normalized box)
+  text; kind?: AnswerKind; confidence: "high" | "low"
+  source?: string              // Gemini's transcription; unchanged source => keep old answer on re-analysis
+  pos?: { x; y }               // set when the user drags it; overrides auto-placement
+  createdAt
 }
 
-type Board = {
-  id: string
-  name: string           // "Board 1"
-  strokes: Stroke[]
-  answers: Answer[]
-  inkVersion: number     // increments when ink changes; used to skip redundant analysis
-  lastAnalyzedVersion: number
-  updatedAt: number
-}
+type DiagramNode = { id; label; blank?: number; fill?: string; result?: "right" | "wrong" }
+type Diagram = { title; layout: "cycle" | "flow" | "tree"; nodes: DiagramNode[]; edges: { from; to; label? }[] }
+type Card = { id; pos; scale; prompt?; createdAt } & ({ type: "diagram"; diagram } | { type: "note"; title; text })
+type TextBox = { id; pos; text; size; createdAt }   // typed by the student (Text tool)
 
-type AppState = { boards: Board[]; activeBoardId: string; sidebarOpen: boolean; version: 1 }
+type Board = { id; name; strokes; answers; cards?; texts?; inkVersion; lastAnalyzedVersion; updatedAt }
+type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 ```
 
-Store coordinates in a board coordinate space independent of screen pixels so boards survive window resizes and different devices. Version the localStorage schema (`version: 1`) so it can be migrated later. Guard localStorage reads/writes with try/catch (Safari private mode can throw) and debounce saves.
+- Board coordinates are CSS pixels of the board, independent of the device pixel ratio.
+- localStorage keys: `ai-whiteboard:v1` (AppState, debounced save + flush on pagehide), `ai-whiteboard:settings:v1` (theme, handwriting, autoAnalyze), `ai-whiteboard:glyphs:v1` (the user's handwriting glyphs). All reads/writes are guarded with try/catch.
+- Undo is per board and in memory: stroke add/erase, card add/delete, answer delete, text add/edit/delete, blank fill.
 
 ---
 
-## 11. Idle detection and request rules
+## 11. Analysis and request rules
 
-State machine per active board: `drawing → idle-waiting → analyzing → showing`.
-
-- The idle timer resets on every stroke start and every stroke point. It fires only when ink has changed since the last analysis (`inkVersion !== lastAnalyzedVersion`) and the board is not empty.
-- Idle delay is one constant (start at 2500 ms). Noah may tune it after real use.
-- Only one Gemini request in flight at a time. If the user starts drawing again while a request is running, abort it (AbortController) and ignore any late result.
-- Switching boards cancels any pending timer/request for the previous board.
-- Empty board: never call the API.
-- After a result: replace the board's answers with the new set. For a "?" whose box center is close to an existing answer's center, keep the existing answer text so answers don't flicker or change between passes. Answers for a "?" that no longer exists (user erased it) disappear on the next pass.
-- API failure: fail quietly. At most a tiny unobtrusive indicator. Never block drawing, never show raw errors on the canvas, never auto-retry in a loop (one retry max, then wait for the next idle).
+- Manual by default: Analyze button or Enter. With auto-analyze on, the idle timer resets on every stroke point and fires only when content changed since the last analysis (`inkVersion !== lastAnalyzedVersion`).
+- Empty board (no strokes, typed text, or practice diagram): never call the API ("Draw something first").
+- Only one analysis request in flight. Starting a new stroke or switching boards aborts it; late results for a changed or inactive board are ignored.
+- After a result: replace the board's answers. For an item near an existing answer whose `source` (transcription) is unchanged, keep the old answer (no flicker). If the problem changed, take the new answer but keep the user's dragged position.
+- API failure: never blocks drawing; one retry for 5xx/network, then a short notice ("Couldn't analyze: Gemini quota exceeded, check API key billing", etc.).
+- `/api/create` (Ask/Photo) runs independently of analysis; several can be pending.
 
 ---
 
 ## 12. Gemini integration
 
-### Route contract: `POST /api/answer`
-- Input: JSON with a base64 PNG (reject anything over a sensible size cap; validate type).
-- Output: JSON `{ found: boolean, items: [{ box: [ymin, xmin, ymax, xmax], answer: string, confidence: "high" | "low" }] }`.
-- Box format: Gemini's documented normalized bounding box convention (verify in current docs; historically ymin/xmin/ymax/xmax scaled 0–1000). Convert to board coordinates in the client.
-- Use structured/JSON output mode with a response schema so the route never has to parse free text. Validate the parsed result server-side and drop malformed items.
-- Truncate every `answer` to 6 words in code regardless of what the model returned.
+### `POST /api/answer`
+- Input: `{ image }`, a base64 PNG. Origin check, per-IP and per-instance rate limit, 4 MB body cap (Vercel Hobby limit is 4.5 MB).
+- Output: `{ found, items: [{ kind, reading, box: [ymin, xmin, ymax, xmax] (0–1000), answer, confidence }] }` via structured output (`responseJsonSchema`). The server validates every item and drops malformed ones.
+- Instruction (in the route): read the WHOLE board. Black ink and typed text are the student's; gray diagrams are app practice sheets. Respond with:
+  - **math**: problems to evaluate, ending in "=", or equations to solve.
+  - **explain**: "Explain X", "X?", "X:?".
+  - **term**: blanks or "?" in diagrams.
+  - **check**: the student's own WRONG answer ("✗ 56"), or blanks the student filled with the pen in a practice diagram ("✓" / "✗ term").
+  Skip correct finished work, headings, notes and doodles. Plain text only. The box covers the whole problem line.
+- `lib/format.ts` post-processing: LaTeX/markdown → plain text with super/subscripts (x², CO₂); per-kind word caps; for math, strip a leading "=" and add "= " when the student wrote no "=".
 
-### Image sent to Gemini
-- ONLY the ink layer, exported from the vector strokes (white background, ink in near-black). Never the overlay, UI, or sidebar.
-- Scale so the long side is at most about 1600px. Keep the aspect ratio. Consider padding or contrast so thin strokes remain legible after downscaling.
-
-### Instruction to Gemini (starting point, refine with testing)
-This is a hand-drawn whiteboard (study diagrams). Find every question mark the user drew that means "what is this called / what goes here". Use surrounding labels, arrows, and diagram structure to decide what the question mark refers to. Answer in 6 words or fewer: a term or short phrase, never a sentence. If you cannot tell, return low confidence rather than inventing an answer. Ignore question marks that are clearly part of normal writing. If there are none, return found=false. Return the box of the question mark itself.
+### `POST /api/create`
+- Input: `{ prompt?, image? }` (JPEG or PNG base64). Output: `{ card: { type: "note", title, text } | { type: "diagram", diagram } }`.
+- Diagrams: 3–14 nodes, short labels, layout cycle/flow/tree. `blank` numbers only when the student asks for blanks/practice; the blank's correct answer stays in `label` (hidden on screen and in the image sent to Gemini). Layout and SVG rendering are done client-side (`lib/diagram.ts`).
 
 ### Correctness rules
-- Wrong answers are worse than no answer.
-- Prefer returning `low` confidence over guessing; the UI shows low-confidence answers visibly muted.
-- If the model answers a different subject than the diagram's (for example an Apple-unrelated topic), that is a failure to log in the report, not something to hide.
+- Wrong answers are worse than no answer. Prefer `low` confidence over guessing; low confidence is shown muted.
+- If the model answers a different subject than the board's, that is a failure to report, not something to hide.
+- Prompts have only been tested with mocked responses, plus a few live math/explain runs by Noah. Tune them against real outputs when possible.
 
 ### Cost, abuse, and privacy
-- This route calls a paid API from a public Vercel deployment. Add protection proportionate to a mockup: payload size cap, basic per-IP rate limiting or a simple shared-passcode gate, and an origin check. Mention what you chose in the report.
-- Do not log images or answers. Do not store boards server-side. Boards (screenshots) are sent to Google's API; note that in the report so Noah knows.
-- One request per idle pass only; the client-side single-flight rule above prevents bursts.
+- Origin check + in-memory rate limit (speed bump only; serverless instances don't share memory) + body cap. No passcode yet.
+- Do not log images, prompts, or answers (error messages only). Board images, prompts and photos go to Google's Gemini API; nothing is stored server-side.
 
 ---
 
-## 13. Answer overlay rendering
+## 13. Overlay rendering
 
-- A separate layer above the ink (DOM or a second canvas), never included in the screenshot export.
-- Position each answer next to its "?" box: prefer to the right of the box; if that would overflow or collide with the board edge, fall back to below, then left. Keep the answer fully on-screen.
-- Style: small clean sans text in system blue, light subtle pill/background so it reads over ink. Low-confidence: muted color/opacity.
-- Renderer should sit behind a small interface (for example `renderAnswer(answer): void`) so the future handwriting renderer can replace the text renderer without touching detection or Gemini code.
+- One DOM overlay above the ink canvases holds answers, AI cards, typed text, editors and the Ask box. It is never part of the image sent to Gemini (practice diagrams are re-rendered in gray for the export).
+- Answer placement: to the right of the answered box, then below, left, above; on-screen; avoiding other answers and cards. Text size follows the height of what was written, capped (text ≤44 px, drawn ≤110 px) and shrunk to fit the screen width.
+- Renderers sit behind `AnswerRenderer { measure(answer, maxW); renderAnswer(answer, maxW) }`: ink (glyphs), text pill, explain card. `makeDefaultRenderer(glyphSet, color)` picks one per answer.
+- Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × / ( ) . x y`, a space, and superscripts. The user's set (Settings → handwriting) is used first when "Write answers in my handwriting" is on.
 
 ---
 
@@ -280,16 +294,17 @@ Suggested manual test cases (expected answers are examples; Noah confirms):
 
 ## 15. Quality bar (acceptance checklist)
 
-1. Pen feel: no visible corners, no lag perceived on iPad, pressure changes width, finger works, palm ignored while pen is active.
+1. Pen feel: no visible corners, no perceived lag on iPad, pressure changes width, finger works, palm ignored while the pen is active.
 2. Nothing on the page scrolls, zooms, or selects while drawing.
-3. Sidebar toggles without losing or distorting strokes; boards switch and persist across refresh.
-4. A drawn "?" gets a short answer within a few seconds of stopping; the answer sits next to the "?" and is clearly AI text.
-5. No "?" → no request result is shown; empty board → no request.
-6. Drawing again mid-request cancels cleanly with no stale answer appearing.
-7. API errors never break drawing.
-8. Key never appears in client code; `next build` passes.
-9. Overlay is never in the screenshot sent to Gemini.
-10. Everything works with touch targets of at least 44px.
+3. The sidebar toggles without losing or distorting strokes. Boards switch and persist across refresh, along with settings and handwriting.
+4. Analyze puts a correct, plainly formatted answer next to what it answers (no LaTeX; "=" when missing; explanations when asked).
+5. Nothing to answer → a notice, no answers. Empty board → no request.
+6. Drawing mid-request cancels cleanly with no stale answer.
+7. API errors never break drawing; the notice says why.
+8. The key is never in client code (`grep -r GEMINI_API_KEY .next/static` → 0 hits); `next build` and `eslint` pass.
+9. AI answers and notes are never in the image sent to Gemini.
+10. Every tap target is ≥44px. Ask/Text work with a keyboard on Mac and with the on-screen keyboard on iPad.
+11. Items can be selected, moved, deleted, and undone. Practice blanks can be filled by pen or by typing and checked.
 
 ---
 
@@ -305,11 +320,12 @@ If it passes: build the live practice mode and handwriting output next. Hardware
 
 ---
 
-## 17. Roadmap hooks (design for these, don't build them)
+## 17. Roadmap hooks
 
-- **Handwriting output:** swap the answer renderer for one that draws strokes in the user's handwriting (approaches: build a personal glyph set from letter samples as Conwrite does, or a generative ink model). Keep answer data and rendering decoupled now.
-- **Practice mode:** the app generates a diagram with blanks and checks what the user fills in. Lesson from Noah's earlier bio study guides: answer checking must be strict about content (for example a missing coefficient is wrong: "NADH + H+" is not "2 NAD+ + H+") while forgiving about typos/format. Design any checker with explicit rules, not vague leniency.
-- **Photo of a physical whiteboard:** same pipeline starting from an uploaded image; Noah's messy real board is the test case.
+- **Handwriting output (next step):** move from per-character glyphs to natural handwriting: connected letters, varied spacing and jitter, multiple samples per character, learning from what the user writes normally. Keep it behind `GlyphSet` / `AnswerRenderer`.
+- **Practice mode:** the typed-answer checker (`lib/check.ts`) follows the rule "strict about content, forgiving about format": numbers/coefficients must match exactly ("NADH + H+" is not "2 NAD+ + H+"), while case, spacing, subscripts and small typos are forgiven. Synonyms ("3-PG" vs "3-PGA") are still marked wrong; a Gemini double-check is a possible next step.
+- **Photo of a physical whiteboard:** works as photo → diagram/note. Not yet: analyzing a photographed board in place, the way Analyze does for drawn boards.
+- **Ink in practice blanks** does not move with the diagram when the diagram is dragged.
 - **Hardware:** ignore for now.
 
 ---
@@ -319,7 +335,7 @@ If it passes: build the live practice mode and handwriting output next. Hardware
 - Honest reporting only. If something fails, is untestable on this machine, or you disagree with a decision here, say so plainly. No sugarcoating and no invented problems.
 - Keep reports condensed: a table of files and what they do (under fifteen words each), a short "decisions" list, a short "flagged" list. No essays, no next-steps lists.
 - Minimal diffs. Match existing patterns in the repo. Do not refactor, rename, or reorganize what you weren't asked to touch.
-- No tests, README, or docs changes unless asked. No new dependencies unless required; if you add one (for example a stroke library), say why in the report.
+- No tests, README, or docs changes unless asked. Keep this CLAUDE.md in sync when Noah changes a decision. No new dependencies unless required; if you add one (for example a stroke library), say why in the report.
 - Do not create extra pages, admin screens, or config unless the task requires it.
 - Run the build once at the end of a task, not per file. Run the dev server only to catch obvious errors.
 - Before using any API or SDK signature from memory (Gemini model id, box format, SDK methods), verify it in the current official docs.
@@ -331,19 +347,21 @@ If it passes: build the live practice mode and handwriting output next. Hardware
 ## 19. Open questions (ask Noah, don't decide silently)
 
 - Product name (currently "AI Whiteboard", working title only).
-- Final Gemini model id to use once checked against current docs and rate limits.
-- Whether the idle delay should be longer or shorter after real use.
-- Whether answers should be dismissible or stay until the "?" is erased.
-- Whether to add a simple passcode gate before sharing the preview URL with classmates.
+- Which Gemini model to use long-term (Flash-Lite fits the free quota; a bigger model may read handwriting and build diagrams more accurately).
+- Whether auto-analyze should become the default again once quota allows, and the idle delay.
+- Whether to add a simple passcode gate (and turn off Vercel login protection) before sharing with classmates.
 - Which classmates/classes to test with.
 
 ---
 
 ## 20. Glossary
 
-- **Ink layer:** the vector strokes the user drew, rendered to canvas. The only thing sent to Gemini.
-- **Overlay layer:** AI answers drawn above the ink. Never sent to Gemini.
-- **Idle:** no stroke activity for the idle delay.
-- **Analysis pass:** one idle-triggered round trip to Gemini.
+- **Board content:** the student's ink strokes and typed text, plus practice diagrams. This is what gets sent to Gemini.
+- **Overlay:** AI answers, AI notes/diagrams, typed text, and editors drawn above the ink. AI items are never sent to Gemini as answers.
+- **Analysis pass:** one Analyze (or idle-triggered) round trip to `/api/answer`.
+- **Answer kind:** math, term, explain, or check. Each kind has its own length cap and renderer.
+- **Card:** an AI note or diagram created via Ask or Photo.
+- **Practice blank:** a numbered empty box in a diagram whose answer the student fills in.
+- **Glyph set:** the stroke shapes used to draw answers (built-in, or the user's own handwriting).
 - **Low confidence:** Gemini unsure; shown muted so the user doesn't trust it blindly.
-- **Mockup:** the version in this repo. Text answers only; testing the loop, not shipping the product.
+- **Mockup:** the version in this repo. It tests the loop; it is not the shipping product.
