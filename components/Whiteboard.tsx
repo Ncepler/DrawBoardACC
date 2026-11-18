@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
-import AnswerOverlay, { makeDefaultRenderer, placeAnswers, type AnswerRenderer, type Selection } from "./AnswerOverlay"
+import AnswerOverlay, { answerMode, makeDefaultRenderer, placeAnswers, type AnswerRenderer, type Selection } from "./AnswerOverlay"
 import Composer from "./Composer"
 import InlineEditor from "./InlineEditor"
 import HandwritingSetup from "./HandwritingSetup"
@@ -210,7 +210,9 @@ export default function Whiteboard() {
     const d = dprRef.current
     const v = viewRef.current
     ctx.setTransform(d * v.k, 0, 0, d * v.k, d * v.x, d * v.y)
-    for (const s of board.strokes) drawStroke(ctx, { ...s, color: inkColor.current })
+    // Zoomed out, lines keep the thickness they have at 100%.
+    const f = v.k < 1 ? 1 / v.k : 1
+    for (const s of board.strokes) drawStroke(ctx, { ...s, color: inkColor.current, width: s.width * f })
   }, [activeBoard])
 
   /** Moves the board under the screen (pan/zoom). Redraws the ink at most once per frame. */
@@ -260,13 +262,14 @@ export default function Whiteboard() {
     const v = viewRef.current
     ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y)
     const pts = d.predicted.length ? [...d.stroke.points, ...d.predicted] : d.stroke.points
-    const path = strokePath(pts, d.stroke.real, d.stroke.width, false)
+    const f = v.k < 1 ? 1 / v.k : 1
+    const path = strokePath(pts, d.stroke.real, d.stroke.width * f, false)
     ctx.fillStyle = inkColor.current
     if (path) ctx.fill(path)
     else {
       const p = pts[0]
       ctx.beginPath()
-      ctx.arc(p.x, p.y, d.stroke.width / 3, 0, Math.PI * 2)
+      ctx.arc(p.x, p.y, (d.stroke.width * f) / 3, 0, Math.PI * 2)
       ctx.fill()
     }
   }, [])
@@ -458,8 +461,10 @@ export default function Whiteboard() {
   }, [settings.theme])
 
   const glyphs = useMemo(() => glyphSetFor(userGlyphs, settings.handwriting), [userGlyphs, settings.handwriting])
+  // The user's own handwriting, if they made any; used by the per-answer "handwriting" toggle even when the setting is off.
+  const mineGlyphs = useMemo(() => (Object.keys(userGlyphs).length ? glyphSetFor(userGlyphs, true) : null), [userGlyphs])
   useEffect(() => {
-    rendererRef.current = makeDefaultRenderer(glyphs, dark ? THEME.dark.ai : THEME.light.ai, settings.handwriting && Object.keys(userGlyphs).length > 0)
+    rendererRef.current = makeDefaultRenderer(glyphs, dark ? THEME.dark.ai : THEME.light.ai, settings.handwriting && Object.keys(userGlyphs).length > 0, mineGlyphs)
   })
 
   useEffect(() => {
@@ -597,6 +602,18 @@ export default function Whiteboard() {
     t: Math.round(e.timeStamp),
   })
 
+  /** Starts a two-finger pan/pinch from the first two touches that are down. */
+  const beginGesture = () => {
+    const [a, b] = [...touchPos.current.entries()].slice(0, 2)
+    if (!a || !b || gesture.current) return
+    gesture.current = {
+      ids: [a[0], b[0]],
+      mid0: { x: (a[1].x + b[1].x) / 2, y: (a[1].y + b[1].y) / 2 },
+      dist0: Math.max(10, Math.hypot(a[1].x - b[1].x, a[1].y - b[1].y)),
+      v0: viewRef.current,
+    }
+  }
+
   const cancelDrawing = () => {
     drawing.current = null
     clearLive()
@@ -649,6 +666,22 @@ export default function Whiteboard() {
     const isTouch = e.pointerType === "touch"
     setSelected(null)
 
+    // The Move tool: any pointer (finger, pen, mouse) drags the board; a second finger pinch-zooms.
+    if (toolRef.current === "hand") {
+      if (isTouch) {
+        touches.current.add(e.pointerId)
+        touchPos.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+        if (touches.current.size > 1) {
+          panDrag.current = null
+          beginGesture()
+          return
+        }
+      }
+      e.currentTarget.setPointerCapture(e.pointerId)
+      panDrag.current = { pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, v0: viewRef.current }
+      return
+    }
+
     // Space + drag with a mouse pans the board.
     if (spaceDown.current && e.pointerType === "mouse") {
       e.currentTarget.setPointerCapture(e.pointerId)
@@ -681,17 +714,7 @@ export default function Whiteboard() {
       if (penDown.current || now < penUntil.current) return // palm rejection
       if (touches.current.size > 1) {
         if (drawing.current?.touch) cancelDrawing() // two fingers: pan and pinch-zoom, not a stroke
-        if (!gesture.current) {
-          const [a, b] = [...touchPos.current.entries()].slice(0, 2)
-          if (a && b) {
-            gesture.current = {
-              ids: [a[0], b[0]],
-              mid0: { x: (a[1].x + b[1].x) / 2, y: (a[1].y + b[1].y) / 2 },
-              dist0: Math.max(10, Math.hypot(a[1].x - b[1].x, a[1].y - b[1].y)),
-              v0: viewRef.current,
-            }
-          }
-        }
+        beginGesture()
         return
       }
     }
@@ -819,7 +842,7 @@ export default function Whiteboard() {
         const v = viewRef.current
         const dpr = dprRef.current
         ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y)
-        drawStroke(ctx, { ...stroke, color: inkColor.current })
+        drawStroke(ctx, { ...stroke, color: inkColor.current, width: stroke.width * (v.k < 1 ? 1 / v.k : 1) })
       }
       clearLive()
       stack.push({ type: "add", stroke })
@@ -1023,6 +1046,34 @@ export default function Whiteboard() {
       flash("Couldn't read that photo")
     }
   }
+  // Paste an image (Cmd/Ctrl+V) or drop one on the board: same flow as the Photo button.
+  const photoRef = useRef<(f: File) => void>(() => {})
+  useEffect(() => {
+    photoRef.current = (f) => void onPhotoPicked(f)
+  })
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === "file" && i.type.startsWith("image/"))
+      const file = item?.getAsFile()
+      if (!file) return
+      e.preventDefault()
+      photoRef.current(file)
+    }
+    window.addEventListener("paste", onPaste)
+    return () => window.removeEventListener("paste", onPaste)
+  }, [])
+
+  /** Flips one answer between typed text and handwriting. */
+  const toggleStyle = (id: string) => {
+    const b = activeBoard()
+    if (!b) return
+    const hw = settings.handwriting && Object.keys(userGlyphs).length > 0
+    patchBoard(b.id, (bd) => ({
+      ...bd,
+      answers: bd.answers.map((a) => (a.id === id ? { ...a, style: answerMode(a, hw) === "text" ? "hand" : "text" } : a)),
+    }))
+  }
+
 
   // ---------- Text tool ----------
   const commitEditor = (text: string) => {
@@ -1104,6 +1155,7 @@ export default function Whiteboard() {
     setTool(t)
     if (t === "ask") flash("Tap where the answer should go")
     if (t === "text") flash("Click anywhere to type, or click a blank to fill it in")
+    if (t === "hand") flash("Drag the board to move around")
     if (t !== "text") setEditor(null)
   }
 
@@ -1115,6 +1167,14 @@ export default function Whiteboard() {
       <div
         ref={hostRef}
         className="absolute inset-0 [touch-action:none] select-none [-webkit-touch-callout:none]"
+        style={{ cursor: tool === "hand" ? "grab" : undefined }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/"))
+          if (!f) return
+          e.preventDefault()
+          void onPhotoPicked(f)
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
@@ -1148,11 +1208,14 @@ export default function Whiteboard() {
           aiColor={dark ? THEME.dark.ai : THEME.light.ai}
           dark={dark}
           handwriting={settings.handwriting && Object.keys(userGlyphs).length > 0}
+          mineGlyphs={mineGlyphs}
+          onToggleStyle={toggleStyle}
         />
         {editor && (
           <InlineEditor
             key={editor.kind === "edit" ? editor.id : editor.kind === "blank" ? `${editor.cardId}:${editor.nodeId}` : `${editor.x},${editor.y}`}
             {...editorProps(editor, board)}
+            zoom={editor.kind === "blank" ? 1 : view.k}
             onCommit={commitEditor}
             onCancel={() => setEditor(null)}
           />

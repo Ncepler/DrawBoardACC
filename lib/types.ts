@@ -21,6 +21,7 @@ export type Answer = {
   confidence: "high" | "low"
   source?: string // model's transcription of what this answers; used to tell if the problem changed
   pos?: { x: number; y: number } // set when the user drags the answer; overrides auto-placement
+  style?: "text" | "hand" // set by the per-answer toggle; overrides the default look
   createdAt: number
 }
 

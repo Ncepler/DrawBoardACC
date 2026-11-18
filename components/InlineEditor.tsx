@@ -15,6 +15,7 @@ export default function InlineEditor({
   initial,
   placeholder,
   multiline,
+  zoom = 1,
   onCommit,
   onCancel,
 }: {
@@ -25,6 +26,8 @@ export default function InlineEditor({
   initial: string
   placeholder: string
   multiline: boolean
+  /** Board zoom; when below 1 the editor is drawn at its 100% size. Leave at 1 for editors tied to a diagram. */
+  zoom?: number
   onCommit: (text: string) => void
   onCancel: () => void
 }) {
@@ -81,6 +84,8 @@ export default function InlineEditor({
         fontSize,
         lineHeight: 1.25,
         padding: "4px 6px",
+        transform: zoom < 1 ? `scale(${1 / zoom})` : undefined,
+        transformOrigin: "0 0",
         WebkitUserSelect: "text",
         userSelect: "text",
       }}

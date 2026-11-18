@@ -22,6 +22,7 @@ See CLAUDE.md §0–§13. In short:
 - **Making things:** Ask box and Photo produce notes, diagrams or function graphs (`lib/graph.ts`: formulas plotted on app-drawn axes). Practice blanks can be filled by pen or by typing, and "Check answers" checks the typed ones.
 - **Tools:** the Text tool types on the board (click-out saves, box grows). Clear board button (undoable). Items can be selected, dragged, deleted and undone; undoing a stroke leaves answers alone.
 - **Board:** unbounded with zoom/pan (2%–400%): +/−/reset under the gear, pinch and two-finger pan, scroll to pan, Ctrl/Cmd+scroll to zoom, Space+drag. View is per board, in memory only.
+- **Looks:** explanations are a typed card by default, other answers use a handwriting-looking font (falls back to a generic cursive off Apple devices); each answer has a typed/handwriting toggle. Zoomed out, text, answers and line thickness keep their 100% size. Move tool in the toolbar; paste or drop an image opens the Photo box.
 - **Settings:** light/dark, your-own-handwriting glyphs (letters, numbers, a "More symbols" tab, gray guide letters, undo), auto-analyze. Answers show exponents `^(…)` raised.
 - **Demos:** the `/demo` page.
 
