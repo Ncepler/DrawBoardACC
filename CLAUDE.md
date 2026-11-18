@@ -267,7 +267,11 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 - One DOM overlay above the ink canvases holds answers, AI cards, typed text, editors and the Ask box. It is never part of the image sent to Gemini (practice diagrams are re-rendered in gray for the export).
 - Answer placement: to the right of the answered box, then below, left, above; on-screen; avoiding other answers and cards. Text size follows the height of what was written, capped (text ≤44 px, drawn ≤110 px) and shrunk to fit the screen width.
 - Renderers sit behind `AnswerRenderer { measure(answer, maxW); renderAnswer(answer, maxW) }`: ink (glyphs), text pill, explain card. `makeDefaultRenderer(glyphSet, color)` picks one per answer.
-- Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × / ( ) . x y`, a space, and superscripts. The user's set (Settings → handwriting) is used first when "Write answers in my handwriting" is on.
+- Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × / ( ) . x y`, a space, and superscripts.
+- With "Write answers in my handwriting" on and at least one glyph set up, EVERY answer (explanations included) is drawn with the user's glyphs. Long answers wrap onto several lines.
+  - Sub/superscript digits are drawn with the user's own digits, scaled and shifted.
+  - A character the user hasn't written is typeset in a plain font at the same size, so one missing glyph never drops the whole answer to text.
+- With handwriting off, only fully-glyphed math is drawn; explanations show as a card and everything else as a text pill.
 
 ---
 

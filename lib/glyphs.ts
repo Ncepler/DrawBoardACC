@@ -115,19 +115,60 @@ for (const [sup, base] of Object.entries(SUPERSCRIPTS)) {
 export const builtinGlyphs: GlyphSet = { get: (ch) => GLYPHS[ch] }
 
 const SPACING = 0.2
+// A typeset character drawn at glyph height h: font size so its cap height ≈ h.
+const FALLBACK_EM = 1 / 0.72
+const FALLBACK_FONT = '-apple-system, "SF Pro Text", system-ui, sans-serif'
 
-/** Width of a run of text in units of glyph height, or null if any character is unsupported. */
-export function measureRun(text: string, set: GlyphSet = builtinGlyphs): number | null {
-  let w = 0
-  for (const ch of text) {
-    const g = set.get(ch)
-    if (!g) return null
-    w += g.width + SPACING
-  }
-  return w - SPACING
+let measureCtx: CanvasRenderingContext2D | null = null
+function fallbackWidth(ch: string) {
+  if (typeof document === "undefined") return 0.55
+  measureCtx ??= document.createElement("canvas").getContext("2d")
+  if (!measureCtx) return 0.55
+  measureCtx.font = `400 ${100 * FALLBACK_EM}px ${FALLBACK_FONT}`
+  return measureCtx.measureText(ch).width / 100
 }
 
-/** Draws `text` as pen strokes with its top-left at (x, y); `h` is the glyph height in px. */
+/** Advance of one character in units of glyph height. `loose`: characters without a glyph are typeset. */
+function advance(ch: string, set: GlyphSet, loose: boolean): number | null {
+  const g = set.get(ch)
+  if (g) return g.width + SPACING
+  return loose ? fallbackWidth(ch) + SPACING : null
+}
+
+/**
+ * Width of a run of text in units of glyph height. Strict (default): null if any
+ * character has no glyph. Loose: missing characters are typeset instead.
+ */
+export function measureRun(text: string, set: GlyphSet = builtinGlyphs, loose = false): number | null {
+  let w = 0
+  for (const ch of text) {
+    const a = advance(ch, set, loose)
+    if (a === null) return null
+    w += a
+  }
+  return Math.max(0, w - SPACING)
+}
+
+/** Word-wraps text so each line is at most maxUnits wide (units of glyph height). Loose measuring. */
+export function wrapRun(text: string, set: GlyphSet, maxUnits: number): string[] {
+  const lines: string[] = []
+  let line = ""
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const next = line ? `${line} ${word}` : word
+    if ((measureRun(next, set, true) ?? 0) <= maxUnits || !line) line = next
+    else {
+      lines.push(line)
+      line = word
+    }
+  }
+  if (line) lines.push(line)
+  return lines.length ? lines : [""]
+}
+
+/**
+ * Draws `text` as pen strokes with its top-left at (x, y); `h` is the glyph height
+ * in px. Characters without a glyph are typeset in a plain font at the same size.
+ */
 export function drawRun(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -141,7 +182,13 @@ export function drawRun(
   let cursor = x
   for (const ch of text) {
     const g = set.get(ch)
-    if (!g) continue
+    if (!g) {
+      ctx.font = `400 ${h * FALLBACK_EM}px ${FALLBACK_FONT}`
+      ctx.textBaseline = "alphabetic"
+      ctx.fillText(ch, cursor, y + h)
+      cursor += (fallbackWidth(ch) + SPACING) * h
+      continue
+    }
     for (const stroke of g.strokes) {
       const pts = stroke.map(([gx, gy]) => ({ x: cursor + gx * h, y: y + gy * h }))
       const outline = getStroke(pts, {

@@ -946,6 +946,7 @@ export default function Whiteboard() {
           glyphs={glyphs}
           aiColor={dark ? THEME.dark.ai : THEME.light.ai}
           dark={dark}
+          handwriting={settings.handwriting && Object.keys(userGlyphs).length > 0}
         />
         {editor && (
           <InlineEditor
