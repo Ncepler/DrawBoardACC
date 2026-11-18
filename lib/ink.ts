@@ -3,7 +3,10 @@ import type { Point, Stroke } from "./types"
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v))
 
-export function strokeOptions(real: boolean, size: number, last: boolean) {
+export function strokeOptions(real: boolean, size: number, last: boolean, sharp = false) {
+  if (sharp) {
+    return { size, thinning: 0, smoothing: 0, streamline: 0, simulatePressure: false, start: { cap: true, taper: 0 }, end: { cap: true, taper: 0 }, last }
+  }
   return {
     size,
     thinning: real ? 0.55 : 0.5,
@@ -35,13 +38,14 @@ export function strokePath(
   real: boolean,
   size: number,
   last: boolean,
+  sharp = false,
 ): Path2D | null {
   const input = points.map((p) => ({ x: p.x, y: p.y, pressure: clamp(p.p, 0.05, 1) }))
-  return outlineToPath(getStroke(input, strokeOptions(real, size, last)))
+  return outlineToPath(getStroke(input, strokeOptions(real, size, last, sharp)))
 }
 
 export function drawStroke(ctx: CanvasRenderingContext2D, s: Stroke) {
-  const path = strokePath(s.points, s.real, s.width, true)
+  const path = strokePath(s.points, s.real, s.width, true, s.shape)
   if (!path) {
     // single tap: draw a dot
     const p = s.points[0]

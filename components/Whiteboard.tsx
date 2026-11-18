@@ -5,6 +5,7 @@ import { flushSync } from "react-dom"
 import AnswerOverlay, { answerMode, makeDefaultRenderer, placeAnswers, type AnswerRenderer, type Selection } from "./AnswerOverlay"
 import Composer from "./Composer"
 import PhotoChoice from "./PhotoChoice"
+import ShapePicker from "./ShapePicker"
 import InlineEditor from "./InlineEditor"
 import HandwritingSetup from "./HandwritingSetup"
 import SettingsPanel from "./SettingsPanel"
@@ -16,7 +17,8 @@ import { isCorrect } from "@/lib/check"
 import { BLANK_H, BLANK_W, layoutDiagram } from "@/lib/diagram"
 import { TEXT_PAD, TEXT_SIZE, textBoxSize } from "@/lib/texts"
 import { ERASER_RADIUS, IDLE_MOVE_PX, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
-import { DEMOS, inkFromText } from "@/lib/demos"
+import { EXAMPLES, buildExample } from "@/lib/examples"
+import { pathExtent, shapePath, shapeStroke, SHAPE_WIDTH, type ShapeKind } from "@/lib/shapes"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
 import { failureText, photoToJpeg } from "@/lib/photo"
 import {
@@ -68,6 +70,7 @@ type Drawing = {
   lastX: number
   lastY: number
   touch: boolean
+  start?: Point // where a shape drag began
 }
 
 const MAX_BUFFER_PIXELS = 16_000_000
@@ -182,6 +185,8 @@ export default function Whiteboard() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [selected, setSelected] = useState<Selection>(null)
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle")
+  const shapeRef = useRef<ShapeKind>("rectangle")
   const [composer, setComposer] = useState<ComposerState | null>(null)
   const [photoChoice, setPhotoChoice] = useState<{ file: File; photo: NonNullable<ComposerState["photo"]> } | null>(null)
   const [imgDrag, setImgDrag] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -312,7 +317,7 @@ export default function Whiteboard() {
     ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y)
     const pts = d.predicted.length ? [...d.stroke.points, ...d.predicted] : d.stroke.points
     const f = v.k < 1 ? 1 / v.k : 1
-    const path = strokePath(pts, d.stroke.real, d.stroke.width * f, false)
+    const path = strokePath(pts, d.stroke.real, d.stroke.width * f, false, d.stroke.shape)
     ctx.fillStyle = inkColor.current
     if (path) ctx.fill(path)
     else {
@@ -621,31 +626,33 @@ export default function Whiteboard() {
     }
   }, [hydrated, setView, zoomAt])
 
-  // ---------- demo boards (/?demo=<id> from the demo page) ----------
-  const demoDone = useRef(false)
+  // ---------- example boards (/?example=<id> from the examples page) ----------
+  const exampleDone = useRef(false)
   useEffect(() => {
-    if (!hydrated || demoDone.current) return
-    demoDone.current = true
-    const id = new URLSearchParams(window.location.search).get("demo")
+    if (!hydrated || exampleDone.current) return
+    exampleDone.current = true
+    const id = new URLSearchParams(window.location.search).get("example")
     if (!id) return
     window.history.replaceState(null, "", window.location.pathname)
-    const demo = DEMOS.find((d) => d.id === id)
+    const example = EXAMPLES.find((d) => d.id === id)
     const s = stateRef.current
-    if (!demo || !s) return
+    if (!example || !s) return
     const b = newBoard(s.boards.length + 1)
-    b.name = `Demo: ${demo.title}`
-    b.strokes = (demo.ink ?? []).flatMap((t) => inkFromText(t.text, t.x, t.y, t.h))
+    b.name = `Example: ${example.title}`
+    const built = buildExample(example)
+    b.strokes = built.strokes
+    b.texts = built.texts
     b.inkVersion = b.strokes.length ? 1 : 0
-    if (demo.diagram) {
-      const payload: CardPayload = { type: "diagram", diagram: demo.diagram.diagram }
+    if (example.diagram) {
+      const payload: CardPayload = { type: "diagram", diagram: example.diagram.diagram }
       const { w, h } = sizeRef.current
       b.cards = [
-        { ...payload, id: crypto.randomUUID(), pos: { x: demo.diagram.x, y: demo.diagram.y }, scale: fitScale(payload, w, h), createdAt: Date.now() },
+        { ...payload, id: crypto.randomUUID(), pos: { x: example.diagram.x, y: example.diagram.y }, scale: fitScale(payload, w, h), createdAt: Date.now() },
       ]
     }
     commit({ ...s, boards: [...s.boards, b], activeBoardId: b.id, sidebarOpen: false })
-    if (demo.ask) setComposer({ x: demo.ask.x, y: demo.ask.y, prompt: demo.ask.prompt, photo: null })
-    flash(demo.hint, 7000)
+    if (example.create) setComposer({ x: example.create.x, y: example.create.y, prompt: example.create.prompt, photo: null })
+    flash(example.hint, 7000)
   }, [hydrated, commit, flash])
 
   const activeId = state?.activeBoardId
@@ -705,8 +712,6 @@ export default function Whiteboard() {
     // Answers are erased like ink: when the eraser passes over one. Erasing the question leaves its answer.
     const hitAnswers: { answer: Answer; index: number }[] = []
     if (board.answers.length && rendererRef.current) {
-      const k = viewRef.current.k
-      const f = k < 1 ? 1 / k : 1 // answers keep their 100% size when zoomed out
       const pos = placeAnswers(board.answers, board.cards ?? [], sizeRef.current.w - 16, rendererRef.current)
       const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / Math.max(2, r / 2)))
       board.answers.forEach((a, index) => {
@@ -715,7 +720,7 @@ export default function Whiteboard() {
         for (let i = 0; i <= steps; i++) {
           const x = ax + ((bx - ax) * i) / steps
           const y = ay + ((by - ay) * i) / steps
-          if (x >= p.left - r && x <= p.left + p.w * f + r && y >= p.top - r && y <= p.top + p.h * f + r) {
+          if (x >= p.left - r && x <= p.left + p.w + r && y >= p.top - r && y <= p.top + p.h + r) {
             hitAnswers.push({ answer: a, index })
             return
           }
@@ -844,6 +849,10 @@ export default function Whiteboard() {
         createdAt: Date.now(),
       }
     }
+    if (d.tool === "shape") {
+      d.start = pt
+      d.stroke = { ...shapeStroke([[pt.x, pt.y]]), width: SHAPE_WIDTH }
+    }
     drawing.current = d
     if (d.tool === "eraser") eraseAt(d, pt.x, pt.y, pt.x, pt.y)
     else scheduleLive()
@@ -883,13 +892,16 @@ export default function Whiteboard() {
         eraseAt(d, d.lastX, d.lastY, pt.x, pt.y)
         d.lastX = pt.x
         d.lastY = pt.y
+      } else if (d.tool === "shape" && d.stroke && d.start) {
+        d.stroke.points = shapePath(shapeRef.current, d.start, pt).map(([x, y], i) => ({ x, y, p: 0.5, t: i }))
       } else if (d.stroke) {
         const last = d.stroke.points[d.stroke.points.length - 1]
         if (last.x === pt.x && last.y === pt.y) continue
         d.stroke.points.push(pt)
       }
     }
-    if (d.stroke) {
+    if (d.stroke && d.tool === "shape") scheduleLive()
+    else if (d.stroke) {
       const predicted = typeof native.getPredictedEvents === "function" ? native.getPredictedEvents() : []
       d.predicted = predicted.map((ev) => pointOf(ev, rect, real)) // drawn, never stored
       scheduleLive()
@@ -939,7 +951,11 @@ export default function Whiteboard() {
     drawing.current = null
     const board = activeBoard()
     if (!board) return
-    if (d.tool === "pen" && d.stroke) {
+    if (d.tool === "shape" && d.stroke && pathExtent(d.stroke.points) < 8) {
+      clearLive() // a tap, not a shape
+      return
+    }
+    if ((d.tool === "pen" || d.tool === "shape") && d.stroke) {
       const stroke = d.stroke
       const ctx = inkRef.current?.getContext("2d")
       if (ctx) {
@@ -1195,7 +1211,7 @@ export default function Whiteboard() {
     void createCard(prompt, c.photo?.base64 ?? null, { x: c.x, y: c.y }, undefined, { x: c.x, y: c.y, prompt, photo: c.photo })
   }
 
-  /** Toolbar Create button: the same box as the demo's "make it for me", in the middle of the screen. */
+  /** Toolbar Create button: the same box as the examples' "make it for me", in the middle of the screen. */
   const openCreate = () => {
     changeTool("pen")
     const { w, h } = sizeRef.current
@@ -1448,7 +1464,6 @@ export default function Whiteboard() {
           <InlineEditor
             key={editor.kind === "edit" ? editor.id : editor.kind === "blank" ? `${editor.cardId}:${editor.nodeId}` : `${editor.x},${editor.y}`}
             {...editorProps(editor, board)}
-            zoom={editor.kind === "blank" ? 1 : view.k}
             onCommit={commitEditor}
             onCancel={() => setEditor(null)}
           />
@@ -1555,9 +1570,16 @@ export default function Whiteboard() {
         open={state.sidebarOpen}
         onSelect={selectBoard}
         onAdd={addBoard}
-        canClear={!isBlank(state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0])}
-        onClear={clearBoard}
       />
+      {tool === "shape" && (
+        <ShapePicker
+          value={shapeKind}
+          onPick={(k) => {
+            shapeRef.current = k
+            setShapeKind(k)
+          }}
+        />
+      )}
       <Toolbar
         tool={tool}
         onTool={changeTool}

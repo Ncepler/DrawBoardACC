@@ -7,6 +7,7 @@ export type Stroke = {
   width: number
   color: string
   real: boolean // true when pressure came from a real pen
+  shape?: boolean // made by the Shapes tool: constant width, sharp corners
   createdAt: number
 }
 

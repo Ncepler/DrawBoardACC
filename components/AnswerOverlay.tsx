@@ -470,7 +470,6 @@ export default function AnswerOverlay({
             h={r.h}
             scale={scale}
             selected={sel}
-            keepSize
             onSelect={() => onSelect(sel ? null : { type: "answer", id: a.id })}
             onMove={(x, y) => onMoveAnswer(a.id, x, y)}
             onDelete={() => onDelete({ type: "answer", id: a.id })}
@@ -514,7 +513,6 @@ export default function AnswerOverlay({
             h={h}
             scale={scale}
             selected={sel}
-            keepSize
             // tap a selected box (or any box with the Text tool) to edit it
             onSelect={() => (sel || textTool ? onEditText(t.id) : onSelect({ type: "text", id: t.id }))}
             onMove={(x, y) => onMoveText(t.id, x, y)}

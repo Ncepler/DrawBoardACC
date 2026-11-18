@@ -14,6 +14,7 @@ Read the WHOLE board and decide what the student wants done. A question mark is 
 Respond to, with the matching "kind":
 - "math": a math problem to evaluate or simplify, including an expression with no "=" after it ("2500+10"), one ending in "=" ("1+1="), or "= ?". Also an equation to solve ("3x+5=20" -> "x = 5").
   FOLLOW-UPS: the student may continue from a blue answer, for example writing "÷ 2" or "× 5 =" or "+ 4" under or next to a blue "6". Treat the blue answer as the starting value and answer the NEW step only (6 ÷ 2 -> "3"). The "box" is only the student's new writing, never the blue answer.
+- GEOMETRY: a drawn figure (triangle, polygon, parallel lines, a circle) with an unknown angle or length marked "x", "?" or a blank. Work it out from the labelled angles and sides (angles in a triangle add to 180°, on a straight line 180°, in a quadrilateral 360°, and so on) and answer with kind "math" and the value with its unit ("x = 70°", "8 cm"). The "box" for a geometry item is tight around that ONE unknown label, or the angle mark at its vertex, so the answer is drawn right at that angle. It is never the whole figure. Several unknown angles each get their own item with their own box. If the figure does not give enough information, use low confidence.
 - "explain": the student asks to explain or describe something, or writes a topic followed by "?" or ":?" ("Krebs cycle:?", "Explain civil war", "what is osmosis"). Also any command that wants text back: define, list, summarize, translate, convert units, compare, write a sentence or short poem, name steps. Do what the command says in at most 60 words.
 - "term": a blank, empty box, or "?" in a diagram or sentence where a name or value goes. Name what belongs there using the surrounding labels, arrows, and structure.
 - "check": the student wrote their own answer and it is WRONG ("7x8=54"), or the student filled a blank in a gray practice diagram. For wrong work answer "✗ " plus the correct answer. For a correctly filled practice blank answer "✓". For a wrong practice blank answer "✗ " plus the correct term. Do not mark correct work outside practice diagrams.
@@ -31,7 +32,7 @@ Answer format:
 
 For each item:
 - "reading": your transcription of the problem, command, or blank ("2500+10", "÷ 2", "write out a diagram for the photosynthesis equation").
-- "box": the tight bounding box of what the student wrote that you respond to (the full line or region, not one symbol), as [ymin, xmin, ymax, xmax] normalized to 0-1000. The answer is shown to the right of it.
+- "box": the tight bounding box of what the student wrote that you respond to (the full line or region, not one symbol; for geometry just the unknown label or angle mark), as [ymin, xmin, ymax, xmax] normalized to 0-1000. The answer is shown to the right of it.
 - "confidence": "high" only when you are sure; otherwise "low" with your best answer. A wrong answer is worse than a cautious one.
 
 Return found=false with an empty items list only if there is nothing to respond to.`

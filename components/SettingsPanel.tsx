@@ -95,8 +95,8 @@ export default function SettingsPanel({
         </div>
 
         <div className="mx-4 my-2 border-t border-[var(--hairline)]" />
-        <a href="/demo" className={`${row} text-[var(--ai)] active:bg-[var(--press)]`}>
-          See demos
+        <a href="/examples" className={`${row} text-[var(--ai)] active:bg-[var(--press)]`}>
+          See examples
         </a>
       </div>
     </>

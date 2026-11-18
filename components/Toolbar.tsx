@@ -1,6 +1,6 @@
 "use client"
 
-export type Tool = "pen" | "eraser" | "text" | "ask" | "hand"
+export type Tool = "pen" | "eraser" | "text" | "ask" | "hand" | "shape"
 
 const btn =
   "flex h-11 w-11 items-center justify-center rounded-full transition-colors duration-150 [touch-action:manipulation] disabled:opacity-30"
@@ -81,9 +81,29 @@ export default function Toolbar({
           <path d="M20 9H10a6 6 0 000 12h3" />
         </svg>
       </button>
-      <button type="button" aria-label="Clear board" title="Clear board (Undo brings it back)" disabled={!canClear} className={`${btn} ${idle}`} onClick={onClear}>
+      <button
+        type="button"
+        aria-label="Clear board"
+        title="Clear board (Undo brings it back)"
+        disabled={!canClear}
+        className={`${btn} text-[#FF3B30] active:bg-[var(--press)]`}
+        onClick={onClear}
+      >
         <svg {...icon}>
           <path d="M5 7h14M10 7V5h4v2M7 7l.8 12h8.4L17 7M10.5 11v5M13.5 11v5" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        aria-label="Shapes: draw a square, circle, triangle and more"
+        title="Shapes"
+        aria-pressed={tool === "shape"}
+        className={`${btn} ${tool === "shape" ? active : idle}`}
+        onClick={() => onTool(tool === "shape" ? "pen" : "shape")}
+      >
+        <svg {...icon}>
+          <rect x="3.5" y="11" width="9" height="9" rx="1.2" />
+          <circle cx="15.5" cy="8.5" r="5" />
         </svg>
       </button>
       <button
