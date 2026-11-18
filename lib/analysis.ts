@@ -40,9 +40,13 @@ export function truncateWords(text: string, max = MAX_ANSWER_WORDS) {
   return text.trim().split(/\s+/).slice(0, max).join(" ")
 }
 
+const norm = (t: string | undefined) => (t ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")
+
 /**
- * Turns Gemini's normalized boxes into board-space answers. If a new "?" sits
- * on top of an existing answer, keep the old text so answers don't flicker.
+ * Turns Gemini's normalized boxes into board-space answers. If a new item sits
+ * on an existing answer and the problem text is unchanged, keep the old answer
+ * so it doesn't flicker. If the problem changed, take the new answer but keep
+ * the spot the user dragged it to.
  */
 export function mergeAnswers(
   items: AnswerItem[],
@@ -60,26 +64,40 @@ export function mergeAnswers(
     }
     const cx = box.x + box.w / 2
     const cy = box.y + box.h / 2
-    const limit = Math.max(30, Math.max(box.w, box.h))
     let match: Answer | undefined
     let best = Infinity
     for (const a of existing) {
       if (used.has(a.id)) continue
-      const d = Math.hypot(a.box.x + a.box.w / 2 - cx, a.box.y + a.box.h / 2 - cy)
-      if (d < limit && d < best) {
-        best = d
+      const dx = Math.abs(a.box.x + a.box.w / 2 - cx)
+      const dy = Math.abs(a.box.y + a.box.h / 2 - cy)
+      const near =
+        dx <= 0.35 * Math.max(a.box.w, box.w) + 20 && dy <= 0.6 * Math.max(a.box.h, box.h) + 10
+      if (near && dx + dy < best) {
+        best = dx + dy
         match = a
       }
     }
+    const source = it.reading ?? ""
     if (match) {
       used.add(match.id)
-      return { ...match, box }
+      const same = norm(match.source) === norm(source) && norm(source) !== ""
+      if (same) return { ...match, box }
+      return {
+        id: match.id,
+        box,
+        text: truncateWords(it.answer),
+        confidence: it.confidence,
+        source,
+        pos: match.pos,
+        createdAt: Date.now(),
+      }
     }
     return {
       id: crypto.randomUUID(),
       box,
       text: truncateWords(it.answer),
       confidence: it.confidence,
+      source,
       createdAt: Date.now(),
     }
   })
