@@ -2,8 +2,10 @@ import { GoogleGenAI } from "@google/genai"
 
 export const maxDuration = 30
 
-// The one place the model id lives (checked against current Gemini docs / SDK README).
-const GEMINI_MODEL = "gemini-3.8-flash"
+// The one place model ids live (checked against the current Gemini models page).
+// Tried in order; a quota (429) or not-found (404) error moves on to the next one,
+// since quotas are per model.
+const GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
 
 const MAX_WORDS = 6
 const MAX_BODY_BYTES = 4 * 1024 * 1024 // Vercel Hobby caps request bodies at 4.5MB
@@ -120,17 +122,30 @@ export async function POST(req: Request) {
       apiKey,
       httpOptions: { timeout: 25_000, retryOptions: { attempts: 1 } },
     })
-    const res = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [{ role: "user", parts: [{ inlineData: { mimeType: "image/png", data: image } }] }],
-      config: {
-        systemInstruction: INSTRUCTION,
-        responseMimeType: "application/json",
-        responseJsonSchema: RESPONSE_SCHEMA,
-        temperature: 0.2,
-        abortSignal: req.signal,
-      },
-    })
+    let res
+    let lastErr: unknown
+    for (const model of GEMINI_MODELS) {
+      try {
+        res = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ inlineData: { mimeType: "image/png", data: image } }] }],
+          config: {
+            systemInstruction: INSTRUCTION,
+            responseMimeType: "application/json",
+            responseJsonSchema: RESPONSE_SCHEMA,
+            temperature: 0.2,
+            abortSignal: req.signal,
+          },
+        })
+        break
+      } catch (err) {
+        lastErr = err
+        const m = String((err as Error)?.message ?? err)
+        console.error(`gemini ${model} failed:`, m.slice(0, 900))
+        if (!/"code":\s*(429|404)|RESOURCE_EXHAUSTED|NOT_FOUND/.test(m)) throw err
+      }
+    }
+    if (!res) throw lastErr
     let parsed: unknown
     try {
       parsed = JSON.parse(res.text ?? "")
