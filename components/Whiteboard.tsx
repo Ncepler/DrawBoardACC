@@ -490,6 +490,11 @@ export default function Whiteboard() {
     commit({ ...s, boards: [...s.boards, b], activeBoardId: b.id })
   }
 
+  const moveAnswer = (id: string, x: number, y: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, answers: bd.answers.map((a) => (a.id === id ? { ...a, pos: { x, y } } : a)) }))
+  }
+
   const toggleSidebar = () => {
     const s = stateRef.current
     if (s) commit({ ...s, sidebarOpen: !s.sidebarOpen })
@@ -516,7 +521,7 @@ export default function Whiteboard() {
       >
         <canvas ref={inkRef} className="absolute inset-0 h-full w-full" />
         <canvas ref={liveRef} className="absolute inset-0 h-full w-full" />
-        <AnswerOverlay answers={board.answers} width={size.w} height={size.h} />
+        <AnswerOverlay answers={board.answers} width={size.w} height={size.h} onMove={moveAnswer} />
       </div>
 
       <button

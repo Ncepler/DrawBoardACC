@@ -15,6 +15,7 @@ export type Answer = {
   box: { x: number; y: number; w: number; h: number }
   text: string
   confidence: "high" | "low"
+  pos?: { x: number; y: number } // set when the user drags the answer; overrides auto-placement
   createdAt: number
 }
 
