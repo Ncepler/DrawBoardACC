@@ -4,7 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react"
 import Draggable from "./Draggable"
 import { NOTE_BODY_PX, NOTE_LINE, NOTE_PAD, NOTE_TITLE_PX, NOTE_W, cardSize, noteLines } from "@/lib/cards"
 import { DARK_SCREEN_COLORS, DIAGRAM_HANDLE, SCREEN_COLORS, diagramSvg, layoutDiagram } from "@/lib/diagram"
-import { builtinGlyphs, drawRun, measureRun, type GlyphSet } from "@/lib/glyphs"
+import { builtinGlyphs, drawRun, measureRun, wrapRun, type GlyphSet } from "@/lib/glyphs"
 import { textWidth, wrapLines } from "@/lib/measure"
 import { TEXT_LINE, TEXT_PAD, textBoxSize } from "@/lib/texts"
 import type { Answer, Card, TextBox } from "@/lib/types"
@@ -90,24 +90,45 @@ export const explainAnswerRenderer: AnswerRenderer = {
   },
 }
 
-/** Glyph height matches the height of what was written. */
-function inkHeight(a: Answer, maxW: number, set: GlyphSet) {
-  const run = measureRun(a.text, set) ?? 1
-  const fit = (maxW - 8) / (run + 0.24)
-  return Math.round(Math.max(16, Math.min(MAX_INK_PX, Math.max(24, a.box.h * 0.8), fit)))
-}
+type InkLayout = { gh: number; pad: number; lines: string[]; w: number; h: number }
+const LINE_GAP = 1.45 // line height in glyph heights
 
-function inkSize(a: Answer, maxW: number, set: GlyphSet) {
-  const gh = inkHeight(a, maxW, set)
-  const run = measureRun(a.text, set) ?? 0
-  const pad = gh * 0.12
-  // extra room below for descenders (g, y, p) in the user's own handwriting
-  return { w: Math.ceil(run * gh + 2 * pad), h: Math.ceil(gh * 1.25 + 2 * pad) }
+/**
+ * Layout for a drawn answer. Short answers: glyph height follows what was written,
+ * shrunk to fit the screen. Explanations (and anything too wide): wrapped onto
+ * several lines like real handwriting.
+ */
+function inkLayout(a: Answer, maxW: number, set: GlyphSet): InkLayout {
+  const explain = a.kind === "explain"
+  let gh = explain
+    ? Math.round(Math.min(32, Math.max(22, a.box.h * 0.45)))
+    : Math.round(Math.max(16, Math.min(MAX_INK_PX, Math.max(24, a.box.h * 0.8))))
+  const lineMax = explain ? Math.min(560, maxW) : maxW
+  let pad = gh * 0.15
+  const run = measureRun(a.text, set, true) ?? 0
+  let lines: string[]
+  if (!explain && run * gh + 2 * pad > lineMax) {
+    // try to keep a short answer on one line by shrinking it a little
+    const fit = (lineMax - 2 * pad) / run
+    if (fit >= Math.max(16, gh * 0.6)) gh = Math.floor(fit)
+  }
+  pad = gh * 0.15
+  if (run * gh + 2 * pad <= lineMax) lines = [a.text]
+  else lines = wrapRun(a.text, set, (lineMax - 2 * pad) / gh)
+  const widest = Math.max(...lines.map((l) => measureRun(l, set, true) ?? 0))
+  return {
+    gh,
+    pad,
+    lines,
+    w: Math.ceil(widest * gh + 2 * pad),
+    h: Math.ceil((lines.length - 1) * gh * LINE_GAP + gh * 1.3 + 2 * pad),
+  }
 }
 
 function InkAnswer({ answer, maxW, set, color }: { answer: Answer; maxW: number; set: GlyphSet; color: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
-  const { w, h } = inkSize(answer, maxW, set)
+  const L = inkLayout(answer, maxW, set)
+  const { w, h } = L
   useEffect(() => {
     const canvas = ref.current
     const ctx = canvas?.getContext("2d")
@@ -117,9 +138,8 @@ function InkAnswer({ answer, maxW, set, color }: { answer: Answer; maxW: number;
     canvas.height = Math.round(h * dpr)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    const gh = inkHeight(answer, maxW, set)
-    const pad = gh * 0.12
-    drawRun(ctx, answer.text, pad, pad, gh, color, set)
+    const lay = inkLayout(answer, maxW, set)
+    lay.lines.forEach((line, i) => drawRun(ctx, line, lay.pad, lay.pad + i * lay.gh * LINE_GAP, lay.gh, color, set))
   }, [answer, w, h, maxW, set, color])
   return (
     <canvas
@@ -133,16 +153,29 @@ function InkAnswer({ answer, maxW, set, color }: { answer: Answer; maxW: number;
 /** Answers drawn as pen strokes: built-in strokes for math, or the user's own handwriting. */
 export function makeInkRenderer(set: GlyphSet, color: string): AnswerRenderer {
   return {
-    measure: (a, maxW) => inkSize(a, maxW, set),
+    measure: (a, maxW) => {
+      const L = inkLayout(a, maxW, set)
+      return { w: L.w, h: L.h }
+    },
     renderAnswer: (a, maxW) => <InkAnswer answer={a} maxW={maxW} set={set} color={color} />,
   }
 }
 
-/** Ink when every character has a glyph, a card for explanations, otherwise the text pill. */
-export function makeDefaultRenderer(set: GlyphSet, color: string): AnswerRenderer {
+/**
+ * Handwriting on: every answer is drawn in the user's handwriting (explanations
+ * wrap; characters they haven't written are typeset). Off: math is drawn with the
+ * built-in strokes, explanations get a card, everything else a text pill.
+ */
+export function makeDefaultRenderer(set: GlyphSet, color: string, handwriting = false): AnswerRenderer {
   const ink = makeInkRenderer(set, color)
   const pick = (a: Answer): AnswerRenderer =>
-    a.kind === "explain" ? explainAnswerRenderer : measureRun(a.text, set) !== null ? ink : textAnswerRenderer
+    handwriting
+      ? ink
+      : a.kind === "explain"
+        ? explainAnswerRenderer
+        : measureRun(a.text, set) !== null
+          ? ink
+          : textAnswerRenderer
   return {
     measure: (a, maxW) => pick(a).measure(a, maxW),
     renderAnswer: (a, maxW) => pick(a).renderAnswer(a, maxW),
@@ -268,6 +301,7 @@ export default function AnswerOverlay({
   glyphs = builtinGlyphs,
   aiColor = "#007AFF",
   dark = false,
+  handwriting = false,
 }: {
   answers: Answer[]
   cards: Card[]
@@ -288,8 +322,9 @@ export default function AnswerOverlay({
   glyphs?: GlyphSet
   aiColor?: string
   dark?: boolean
+  handwriting?: boolean
 }) {
-  const renderer = makeDefaultRenderer(glyphs, aiColor)
+  const renderer = makeDefaultRenderer(glyphs, aiColor, handwriting)
   const positions = place(answers, cards, width, height, renderer)
   const maxW = width - 16
   const bounds = { w: width, h: height }

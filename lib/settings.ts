@@ -42,9 +42,32 @@ export function saveGlyphs(glyphs: UserGlyphs) {
 }
 
 /** The user's own glyphs first, the built-in stroke set for anything they haven't written. */
+const SUP = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+const SUB = "₀₁₂₃₄₅₆₇₈₉"
+
+/** A user's digit, shrunk and raised (superscript) or lowered (subscript). */
+function shifted(g: Glyph, dy: number): Glyph {
+  return { width: g.width * 0.6, strokes: g.strokes.map((st) => st.map(([x, y]) => [x * 0.6, y * 0.55 + dy] as [number, number])) }
+}
+
 export function glyphSetFor(user: UserGlyphs, handwriting: boolean): GlyphSet {
   if (!handwriting) return builtinGlyphs
-  return { get: (ch) => user[ch] ?? builtinGlyphs.get(ch) }
+  const cache = new Map<string, Glyph | undefined>()
+  return {
+    get: (ch) => {
+      if (user[ch]) return user[ch]
+      if (cache.has(ch)) return cache.get(ch)
+      let g: Glyph | undefined
+      const sup = SUP.indexOf(ch)
+      const sub = SUB.indexOf(ch)
+      if (sup >= 0 && user[String(sup)]) g = shifted(user[String(sup)], -0.08)
+      else if (sub >= 0 && user[String(sub)]) g = shifted(user[String(sub)], 0.62)
+      else if (ch === "−" && user["-"]) g = user["-"]
+      else g = builtinGlyphs.get(ch)
+      cache.set(ch, g)
+      return g
+    },
+  }
 }
 
 export function resolveDark(theme: Theme) {
