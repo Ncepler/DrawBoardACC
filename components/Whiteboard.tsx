@@ -4,12 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import AnswerOverlay, { type Selection } from "./AnswerOverlay"
 import Composer from "./Composer"
+import InlineEditor from "./InlineEditor"
 import HandwritingSetup from "./HandwritingSetup"
 import SettingsPanel from "./SettingsPanel"
 import Sidebar from "./Sidebar"
 import Toolbar, { type Tool } from "./Toolbar"
 import { exportBoardPng, mergeAnswers, pruneAnswers } from "@/lib/analysis"
 import { cardSize, fitScale, naturalSize } from "@/lib/cards"
+import { isCorrect } from "@/lib/check"
+import { BLANK_H, BLANK_W, layoutDiagram } from "@/lib/diagram"
+import { TEXT_PAD, TEXT_SIZE } from "@/lib/texts"
 import { ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
 import { DEMOS, inkFromText } from "@/lib/demos"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
@@ -27,7 +31,7 @@ import {
   type UserGlyphs,
 } from "@/lib/settings"
 import { initialState, loadState, newBoard, saveState } from "@/lib/storage"
-import type { Answer, AnswerItem, AppState, Board, Card, CardPayload, Point, Stroke } from "@/lib/types"
+import type { Answer, AnswerItem, AppState, Board, Card, CardPayload, Point, Stroke, TextBox } from "@/lib/types"
 
 type UndoAction =
   | { type: "add"; stroke: Stroke }
@@ -35,6 +39,16 @@ type UndoAction =
   | { type: "card-add"; card: Card }
   | { type: "card-del"; card: Card; index: number }
   | { type: "answer-del"; answer: Answer; index: number }
+  | { type: "text-add"; text: TextBox }
+  | { type: "text-del"; text: TextBox; index: number }
+  | { type: "text-edit"; id: string; prev: string }
+  | { type: "fill"; cardId: string; nodeId: string; prev?: string }
+
+/** Open Text-tool editor: a new box, an existing box, or a practice blank. */
+type EditorState =
+  | { kind: "new"; x: number; y: number }
+  | { kind: "edit"; id: string }
+  | { kind: "blank"; cardId: string; nodeId: string; x: number; y: number; w: number; h: number; fs: number }
 
 type ComposerState = { x: number; y: number; prompt: string; photo: { dataUrl: string; base64: string } | null }
 
@@ -73,6 +87,37 @@ function freeSpot(at: { x: number; y: number }, w: number, h: number, vw: number
   return { x: clampX(at.x), y: clampY(at.y) }
 }
 
+/** Ink-like changes bump inkVersion so auto-analyze notices them. */
+const bump = (b: Board): Board => ({ ...b, inkVersion: b.inkVersion + 1, updatedAt: Date.now() })
+
+/** Sets (or clears) a practice blank's typed answer; editing clears its old check mark. */
+function setFill(cards: Card[], cardId: string, nodeId: string, fill: string | undefined): Card[] {
+  return cards.map((c) =>
+    c.id === cardId && c.type === "diagram"
+      ? {
+          ...c,
+          diagram: {
+            ...c.diagram,
+            nodes: c.diagram.nodes.map((n) => (n.id === nodeId ? { ...n, fill, result: undefined } : n)),
+          },
+        }
+      : c,
+  )
+}
+
+function editorProps(ed: EditorState, board: Board) {
+  if (ed.kind === "blank") {
+    const card = board.cards?.find((c) => c.id === ed.cardId)
+    const node = card?.type === "diagram" ? card.diagram.nodes.find((n) => n.id === ed.nodeId) : undefined
+    return { x: ed.x, y: ed.y + (ed.h - ed.fs * 1.25 - 10) / 2, width: ed.w, fontSize: Math.max(13, ed.fs), initial: node?.fill ?? "", placeholder: `Blank ${node?.blank ?? ""}`, multiline: false }
+  }
+  if (ed.kind === "edit") {
+    const t = board.texts?.find((x) => x.id === ed.id)
+    return { x: (t?.pos.x ?? 0) - 1, y: (t?.pos.y ?? 0) - 1, fontSize: t?.size ?? TEXT_SIZE, initial: t?.text ?? "", placeholder: "Type…", multiline: true }
+  }
+  return { x: Math.max(0, ed.x - TEXT_PAD), y: Math.max(0, ed.y - TEXT_SIZE * 0.7), fontSize: TEXT_SIZE, initial: "", placeholder: "Type…", multiline: true }
+}
+
 export default function Whiteboard() {
   const [state, setState] = useState<AppState | null>(null)
   const [tool, setTool] = useState<Tool>("pen")
@@ -84,7 +129,8 @@ export default function Whiteboard() {
   const [composer, setComposer] = useState<ComposerState | null>(null)
   const [pending, setPending] = useState<{ id: string; boardId: string; x: number; y: number }[]>([])
   const photoInput = useRef<HTMLInputElement>(null)
-  const askTap = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  const askTap = useRef<{ pointerId: number; x: number; y: number; tool: "ask" | "text" } | null>(null)
+  const [editor, setEditor] = useState<EditorState | null>(null)
   const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS)
   const settingsRef = useRef<Settings>(DEFAULT_SETTINGS)
   const [userGlyphs, setUserGlyphs] = useState<UserGlyphs>({})
@@ -201,7 +247,7 @@ export default function Whiteboard() {
     const board = activeBoard()
     if (!board) return
     const practice = (board.cards ?? []).some((c) => c.type === "diagram")
-    if (board.strokes.length === 0 && !practice) {
+    if (board.strokes.length === 0 && !practice && !(board.texts ?? []).length) {
       if (manual) flash("Draw something first")
       if (board.answers.length) patchBoard(board.id, (b) => ({ ...b, answers: [] }))
       return
@@ -214,7 +260,7 @@ export default function Whiteboard() {
     const { w, h } = sizeRef.current
     let exported
     try {
-      exported = await exportBoardPng(board.strokes, board.cards ?? [], w, h)
+      exported = await exportBoardPng(board.strokes, board.cards ?? [], board.texts ?? [], w, h)
     } catch {
       return
     }
@@ -453,6 +499,25 @@ export default function Whiteboard() {
     redrawInk()
   }
 
+  /** Practice blank under a point, with its on-screen rect, if any. */
+  const blankAt = (x: number, y: number): EditorState | null => {
+    const b = activeBoard()
+    for (const c of [...(b?.cards ?? [])].reverse()) {
+      if (c.type !== "diagram") continue
+      const laid = layoutDiagram(c.diagram)
+      for (const box of laid.boxes) {
+        if (!box.blank) continue
+        const bx = c.pos.x + box.x * c.scale
+        const by = c.pos.y + box.y * c.scale
+        const pad = 6
+        if (x >= bx - pad && x <= bx + box.w * c.scale + pad && y >= by - pad && y <= by + box.h * c.scale + pad) {
+          return { kind: "blank", cardId: c.id, nodeId: box.id, x: bx, y: by, w: BLANK_W * c.scale, h: BLANK_H * c.scale, fs: 14 * c.scale }
+        }
+      }
+    }
+    return null
+  }
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return
     const board = activeBoard()
@@ -462,13 +527,13 @@ export default function Whiteboard() {
     const isTouch = e.pointerType === "touch"
     setSelected(null)
 
-    if (toolRef.current === "ask") {
+    if (toolRef.current === "ask" || toolRef.current === "text") {
       if (isTouch && (penDown.current || now < penUntil.current)) return // palm
       // Open the box on lift, not here: the press would steal focus back from it,
       // and iPad only shows the keyboard when focus happens inside the tap.
       e.preventDefault()
       const rect = e.currentTarget.getBoundingClientRect()
-      askTap.current = { pointerId: e.pointerId, x: e.clientX - rect.left, y: e.clientY - rect.top }
+      askTap.current = { pointerId: e.pointerId, x: e.clientX - rect.left, y: e.clientY - rect.top, tool: toolRef.current }
       return
     }
 
@@ -554,8 +619,13 @@ export default function Whiteboard() {
     if (tap && tap.pointerId === e.pointerId) {
       askTap.current = null
       if (e.type === "pointercancel") return
-      toolRef.current = "pen"
       // flushSync mounts the box (and its autoFocus) inside this event, so the keyboard opens.
+      if (tap.tool === "text") {
+        const blank = blankAt(tap.x, tap.y)
+        flushSync(() => setEditor(blank ?? { kind: "new", x: tap.x, y: tap.y }))
+        return
+      }
+      toolRef.current = "pen"
       flushSync(() => {
         setTool("pen")
         setComposer({ x: tap.x, y: tap.y, prompt: "", photo: null })
@@ -599,6 +669,22 @@ export default function Whiteboard() {
     if (!board || drawing.current) return
     const action = undoStacks.current.get(board.id)?.pop()
     if (!action) return
+    if (action.type === "text-add" || action.type === "text-del" || action.type === "text-edit" || action.type === "fill") {
+      patchBoard(board.id, (b) => {
+        const texts = [...(b.texts ?? [])]
+        if (action.type === "text-add") return bump({ ...b, texts: texts.filter((t) => t.id !== action.text.id) })
+        if (action.type === "text-del") {
+          texts.splice(Math.min(action.index, texts.length), 0, action.text)
+          return bump({ ...b, texts })
+        }
+        if (action.type === "text-edit")
+          return bump({ ...b, texts: texts.map((t) => (t.id === action.id ? { ...t, text: action.prev } : t)) })
+        return { ...b, cards: setFill(b.cards ?? [], action.cardId, action.nodeId, action.prev) }
+      })
+      setSelected(null)
+      syncUndo()
+      return
+    }
     if (action.type === "card-add" || action.type === "card-del" || action.type === "answer-del") {
       patchBoard(board.id, (b) => {
         if (action.type === "card-add") return { ...b, cards: (b.cards ?? []).filter((c) => c.id !== action.card.id) }
@@ -666,6 +752,12 @@ export default function Whiteboard() {
       if (index < 0) return
       pushUndo(b.id, { type: "answer-del", answer: b.answers[index], index })
       patchBoard(b.id, (bd) => ({ ...bd, answers: bd.answers.filter((a) => a.id !== sel.id) }))
+    } else if (sel.type === "text") {
+      const texts = b.texts ?? []
+      const index = texts.findIndex((t) => t.id === sel.id)
+      if (index < 0) return
+      pushUndo(b.id, { type: "text-del", text: texts[index], index })
+      patchBoard(b.id, (bd) => bump({ ...bd, texts: (bd.texts ?? []).filter((t) => t.id !== sel.id) }))
     } else {
       const cards = b.cards ?? []
       const index = cards.findIndex((c) => c.id === sel.id)
@@ -735,6 +827,71 @@ export default function Whiteboard() {
     }
   }
 
+  // ---------- Text tool ----------
+  const commitEditor = (text: string) => {
+    const ed = editor
+    const b = activeBoard()
+    setEditor(null)
+    if (!ed || !b) return
+    if (ed.kind === "blank") {
+      const card = (b.cards ?? []).find((c) => c.id === ed.cardId)
+      const prev = card?.type === "diagram" ? card.diagram.nodes.find((n) => n.id === ed.nodeId)?.fill : undefined
+      if ((prev ?? "") === text) return
+      pushUndo(b.id, { type: "fill", cardId: ed.cardId, nodeId: ed.nodeId, prev })
+      patchBoard(b.id, (bd) => ({ ...bd, cards: setFill(bd.cards ?? [], ed.cardId, ed.nodeId, text || undefined) }))
+    } else if (ed.kind === "new") {
+      if (!text) return
+      const t: TextBox = {
+        id: crypto.randomUUID(),
+        pos: { x: Math.max(0, ed.x - TEXT_PAD), y: Math.max(0, ed.y - TEXT_SIZE * 0.7) },
+        text,
+        size: TEXT_SIZE,
+        createdAt: Date.now(),
+      }
+      pushUndo(b.id, { type: "text-add", text: t })
+      patchBoard(b.id, (bd) => bump({ ...bd, texts: [...(bd.texts ?? []), t] }))
+    } else {
+      const t = (b.texts ?? []).find((x) => x.id === ed.id)
+      if (!t || t.text === text) return
+      if (!text) {
+        const index = (b.texts ?? []).indexOf(t)
+        pushUndo(b.id, { type: "text-del", text: t, index })
+        patchBoard(b.id, (bd) => bump({ ...bd, texts: (bd.texts ?? []).filter((x) => x.id !== t.id) }))
+      } else {
+        pushUndo(b.id, { type: "text-edit", id: t.id, prev: t.text })
+        patchBoard(b.id, (bd) => bump({ ...bd, texts: (bd.texts ?? []).map((x) => (x.id === t.id ? { ...x, text } : x)) }))
+      }
+    }
+    scheduleIdle()
+  }
+
+  const moveText = (id: string, x: number, y: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, texts: (bd.texts ?? []).map((t) => (t.id === id ? { ...t, pos: { x, y } } : t)) }))
+  }
+
+  /** Marks each typed practice blank right or wrong against the diagram's answer key. */
+  const checkCard = (cardId: string) => {
+    const b = activeBoard()
+    const card = b?.cards?.find((c) => c.id === cardId)
+    if (!b || card?.type !== "diagram") return
+    let right = 0
+    let total = 0
+    const nodes = card.diagram.nodes.map((n) => {
+      if (!n.blank || !n.fill) return n
+      total++
+      const ok = isCorrect(n.fill, n.label)
+      if (ok) right++
+      return { ...n, result: ok ? ("right" as const) : ("wrong" as const) }
+    })
+    patchBoard(b.id, (bd) => ({
+      ...bd,
+      cards: (bd.cards ?? []).map((c) => (c.id === cardId && c.type === "diagram" ? { ...c, diagram: { ...c.diagram, nodes } } : c)),
+    }))
+    const blanks = card.diagram.nodes.filter((n) => n.blank).length
+    flash(right === blanks ? "All correct!" : `${right} of ${total} right${total < blanks ? `, ${blanks - total} blank` : ""}`)
+  }
+
   const moveAnswer = (id: string, x: number, y: number) => {
     const b = activeBoard()
     if (b) patchBoard(b.id, (bd) => ({ ...bd, answers: bd.answers.map((a) => (a.id === id ? { ...a, pos: { x, y } } : a)) }))
@@ -749,6 +906,8 @@ export default function Whiteboard() {
     toolRef.current = t
     setTool(t)
     if (t === "ask") flash("Tap where the answer should go")
+    if (t === "text") flash("Click anywhere to type, or click a blank to fill it in")
+    if (t !== "text") setEditor(null)
   }
 
   if (!state) return <div className="fixed inset-0 bg-[var(--board)]" />
@@ -778,10 +937,24 @@ export default function Whiteboard() {
           onMoveAnswer={moveAnswer}
           onMoveCard={moveCard}
           onDelete={deleteItem}
+          texts={board.texts ?? []}
+          editingTextId={editor?.kind === "edit" ? editor.id : null}
+          onMoveText={moveText}
+          onEditText={(id) => setEditor({ kind: "edit", id })}
+          onCheck={checkCard}
+          textTool={tool === "text"}
           glyphs={glyphs}
           aiColor={dark ? THEME.dark.ai : THEME.light.ai}
           dark={dark}
         />
+        {editor && (
+          <InlineEditor
+            key={editor.kind === "edit" ? editor.id : editor.kind === "blank" ? `${editor.cardId}:${editor.nodeId}` : `${editor.x},${editor.y}`}
+            {...editorProps(editor, board)}
+            onCommit={commitEditor}
+            onCancel={() => setEditor(null)}
+          />
+        )}
         {composer && (
           <Composer
             key={`${composer.x},${composer.y}`}

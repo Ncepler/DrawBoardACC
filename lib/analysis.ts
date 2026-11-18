@@ -3,7 +3,9 @@ import { EXPORT_MAX_SIDE, INK_COLOR } from "./config"
 import { EXPORT_COLORS, diagramSvg, layoutDiagram } from "./diagram"
 import { truncateWords, KIND_LIMITS } from "./format"
 import { drawStroke } from "./ink"
-import type { Answer, AnswerItem, Card, Stroke } from "./types"
+import { FONT_STACK } from "./measure"
+import { TEXT_LINE, TEXT_PAD, textBoxSize } from "./texts"
+import type { Answer, AnswerItem, Card, Stroke, TextBox } from "./types"
 
 export type ExportRegion = { x: number; y: number; w: number; h: number }
 
@@ -21,7 +23,7 @@ function loadSvg(svg: string): Promise<HTMLImageElement> {
  * PNG. AI answers and notes live on the DOM overlay and are never drawn here, so
  * Gemini never reads its own answers.
  */
-export async function exportBoardPng(strokes: Stroke[], cards: Card[], viewW: number, viewH: number) {
+export async function exportBoardPng(strokes: Stroke[], cards: Card[], texts: TextBox[], viewW: number, viewH: number) {
   const pad = 24
   let x0 = 0, y0 = 0, x1 = viewW, y1 = viewH
   for (const s of strokes) {
@@ -40,6 +42,13 @@ export async function exportBoardPng(strokes: Stroke[], cards: Card[], viewW: nu
     x1 = Math.max(x1, c.pos.x + w + pad)
     y1 = Math.max(y1, c.pos.y + h + pad)
   }
+  for (const t of texts) {
+    const { w, h } = textBoxSize(t)
+    x0 = Math.min(x0, t.pos.x - pad)
+    y0 = Math.min(y0, t.pos.y - pad)
+    x1 = Math.max(x1, t.pos.x + w + pad)
+    y1 = Math.max(y1, t.pos.y + h + pad)
+  }
   const region: ExportRegion = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
   const scale = Math.min(1, EXPORT_MAX_SIDE / Math.max(region.w, region.h))
   const canvas = document.createElement("canvas")
@@ -54,12 +63,20 @@ export async function exportBoardPng(strokes: Stroke[], cards: Card[], viewW: nu
   for (const c of diagrams) {
     if (c.type !== "diagram") continue
     try {
-      const laid = layoutDiagram(c.diagram)
-      const img = await loadSvg(diagramSvg(c.diagram, laid, EXPORT_COLORS))
+      // Typed answers are checked locally ("Check answers"), so Gemini sees empty blanks.
+      const bare = { ...c.diagram, nodes: c.diagram.nodes.map((n) => ({ id: n.id, label: n.label, blank: n.blank })) }
+      const laid = layoutDiagram(bare)
+      const img = await loadSvg(diagramSvg(bare, laid, EXPORT_COLORS))
       ctx.drawImage(img, c.pos.x, c.pos.y, laid.w * c.scale, laid.h * c.scale)
     } catch {
       // a diagram that fails to rasterize is skipped, the ink still goes
     }
+  }
+  ctx.fillStyle = INK_COLOR
+  ctx.textBaseline = "top"
+  for (const t of texts) {
+    ctx.font = `500 ${t.size}px ${FONT_STACK}`
+    t.text.split("\n").forEach((line, i) => ctx.fillText(line, t.pos.x + TEXT_PAD, t.pos.y + TEXT_PAD + i * t.size * TEXT_LINE))
   }
   // Thicker than on screen so thin strokes stay legible after downscaling.
   for (const s of strokes) drawStroke(ctx, { ...s, color: INK_COLOR, width: Math.max(s.width * 1.5, 4 / scale) })

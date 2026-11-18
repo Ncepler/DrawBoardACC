@@ -6,7 +6,8 @@ import { NOTE_BODY_PX, NOTE_LINE, NOTE_PAD, NOTE_TITLE_PX, NOTE_W, cardSize, not
 import { DARK_SCREEN_COLORS, DIAGRAM_HANDLE, SCREEN_COLORS, diagramSvg, layoutDiagram } from "@/lib/diagram"
 import { builtinGlyphs, drawRun, measureRun, type GlyphSet } from "@/lib/glyphs"
 import { textWidth, wrapLines } from "@/lib/measure"
-import type { Answer, Card } from "@/lib/types"
+import { TEXT_LINE, TEXT_PAD, textBoxSize } from "@/lib/texts"
+import type { Answer, Card, TextBox } from "@/lib/types"
 
 /**
  * Swap point for the future handwriting renderer: given an answer, report its
@@ -233,11 +234,25 @@ function DiagramCard({ card, dark }: { card: Extract<Card, { type: "diagram" }>;
   )
 }
 
-export type Selection = { type: "answer" | "card"; id: string } | null
+export type Selection = { type: "answer" | "card" | "text"; id: string } | null
+
+/** Text the student typed: same color as their ink, not AI blue. */
+function TypedText({ t }: { t: TextBox }) {
+  return (
+    <div
+      className="absolute left-0 top-0 whitespace-pre font-medium text-[var(--text)]"
+      style={{ fontSize: t.size, lineHeight: TEXT_LINE, padding: TEXT_PAD }}
+    >
+      {t.text}
+    </div>
+  )
+}
 
 export default function AnswerOverlay({
   answers,
   cards,
+  texts,
+  editingTextId,
   pending,
   width,
   height,
@@ -246,12 +261,18 @@ export default function AnswerOverlay({
   onMoveAnswer,
   onMoveCard,
   onDelete,
+  onMoveText,
+  onEditText,
+  onCheck,
+  textTool,
   glyphs = builtinGlyphs,
   aiColor = "#007AFF",
   dark = false,
 }: {
   answers: Answer[]
   cards: Card[]
+  texts: TextBox[]
+  editingTextId: string | null
   pending: { id: string; x: number; y: number }[]
   width: number
   height: number
@@ -260,6 +281,10 @@ export default function AnswerOverlay({
   onMoveAnswer: (id: string, x: number, y: number) => void
   onMoveCard: (id: string, x: number, y: number) => void
   onDelete: (s: NonNullable<Selection>) => void
+  onMoveText: (id: string, x: number, y: number) => void
+  onEditText: (id: string) => void
+  onCheck: (cardId: string) => void
+  textTool: boolean
   glyphs?: GlyphSet
   aiColor?: string
   dark?: boolean
@@ -288,6 +313,21 @@ export default function AnswerOverlay({
             handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : undefined}
           >
             {c.type === "note" ? <NoteCard card={c} /> : <DiagramCard card={c} dark={dark} />}
+            {c.type === "diagram" && c.diagram.nodes.some((n) => n.blank && n.fill) && (
+              <button
+                type="button"
+                className="pointer-events-auto absolute left-0 flex h-11 items-center rounded-full bg-[#007AFF] px-4 text-[15px] font-medium text-white shadow [touch-action:manipulation] active:opacity-80"
+                style={{ top: h + 8 }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCheck(c.id)
+                }}
+              >
+                Check answers
+              </button>
+            )}
           </Draggable>
         )
       })}
@@ -308,6 +348,28 @@ export default function AnswerOverlay({
             onDelete={() => onDelete({ type: "answer", id: a.id })}
           >
             {renderer.renderAnswer(a, maxW)}
+          </Draggable>
+        )
+      })}
+      {texts.map((t) => {
+        if (t.id === editingTextId) return null
+        const { w, h } = textBoxSize(t)
+        const sel = selected?.type === "text" && selected.id === t.id
+        return (
+          <Draggable
+            key={t.id}
+            x={t.pos.x}
+            y={t.pos.y}
+            w={w}
+            h={h}
+            bounds={bounds}
+            selected={sel}
+            // tap a selected box (or any box with the Text tool) to edit it
+            onSelect={() => (sel || textTool ? onEditText(t.id) : onSelect({ type: "text", id: t.id }))}
+            onMove={(x, y) => onMoveText(t.id, x, y)}
+            onDelete={() => onDelete({ type: "text", id: t.id })}
+          >
+            <TypedText t={t} />
           </Draggable>
         )
       })}

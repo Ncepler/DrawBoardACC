@@ -14,7 +14,20 @@ const TITLE_H = 34
 /** Height of the title strip that doubles as the drag handle. */
 export const DIAGRAM_HANDLE = MARGIN + TITLE_H - 6
 
-type Box = { id: string; x: number; y: number; w: number; h: number; lines: string[]; blank?: number }
+type Box = {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  lines: string[]
+  blank?: number
+  fill?: string
+  result?: "right" | "wrong"
+  answer?: string
+}
+export const BLANK_W = 120
+export const BLANK_H = 40
 export type Laid = { w: number; h: number; boxes: Box[]; title: string }
 
 const esc = (s: string) =>
@@ -22,7 +35,9 @@ const esc = (s: string) =>
 
 function sizeNodes(d: Diagram): Box[] {
   return d.nodes.map((n) => {
-    if (n.blank) return { id: n.id, x: 0, y: 0, w: 110, h: 40, lines: [], blank: n.blank }
+    // fixed size, so typing in a blank never moves anything the student wrote around it
+    if (n.blank)
+      return { id: n.id, x: 0, y: 0, w: BLANK_W, h: BLANK_H, lines: [], blank: n.blank, fill: n.fill, result: n.result, answer: n.label }
     const lines = wrapLines(n.label, FONT, MAX_TEXT_W, 500)
     const w = Math.max(70, Math.max(...lines.map((l) => textWidth(l, FONT, 500))) + 2 * PAD_X)
     return { id: n.id, x: 0, y: 0, w, h: lines.length * LINE + 2 * PAD_Y, lines }
@@ -153,7 +168,7 @@ function exitPoint(b: Box, tx: number, ty: number, pad = 4) {
   return { x: cx + dx * s, y: cy + dy * s }
 }
 
-export type DiagramColors = { stroke: string; text: string; edge: string; fill: string; blank: string; halo: string }
+export type DiagramColors = { stroke: string; text: string; edge: string; fill: string; blank: string; halo: string; student: string }
 
 export const SCREEN_COLORS: DiagramColors = {
   stroke: "#007AFF",
@@ -162,6 +177,7 @@ export const SCREEN_COLORS: DiagramColors = {
   fill: "rgba(255,255,255,0.92)",
   blank: "#007AFF",
   halo: "#ffffff",
+  student: "#1d1d1f",
 }
 export const DARK_SCREEN_COLORS: DiagramColors = {
   stroke: "#0A84FF",
@@ -170,6 +186,7 @@ export const DARK_SCREEN_COLORS: DiagramColors = {
   fill: "rgba(28,28,30,0.92)",
   blank: "#0A84FF",
   halo: "#1c1c1e",
+  student: "#f2f2f7",
 }
 // Gray, so Gemini can tell the printed practice sheet from the student's black ink.
 export const EXPORT_COLORS: DiagramColors = {
@@ -179,6 +196,7 @@ export const EXPORT_COLORS: DiagramColors = {
   fill: "#ffffff",
   blank: "#a1a1a6",
   halo: "#ffffff",
+  student: "#000000",
 }
 
 export function diagramSvg(d: Diagram, laid: Laid, c: DiagramColors): string {
@@ -229,9 +247,24 @@ export function diagramSvg(d: Diagram, laid: Laid, c: DiagramColors): string {
       parts.push(
         // no fill: the student's ink underneath must show through
         `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" fill="none" stroke="${c.blank}" stroke-width="1.5" stroke-dasharray="5 4"/>`,
-        `<circle cx="${b.x}" cy="${b.y}" r="10" fill="${c.blank}"/>`,
-        `<text x="${b.x}" y="${b.y + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">${b.blank}</text>`,
       )
+      const badge = b.result === "right" ? "#34C759" : b.result === "wrong" ? "#FF3B30" : c.blank
+      const mark = b.result === "right" ? "✓" : b.result === "wrong" ? "✗" : String(b.blank)
+      parts.push(
+        `<circle cx="${b.x}" cy="${b.y}" r="10" fill="${badge}"/>`,
+        `<text x="${b.x}" y="${b.y + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">${mark}</text>`,
+      )
+      if (b.fill) {
+        const fs = Math.min(FONT, Math.max(9, ((b.w - 16) / Math.max(1, textWidth(b.fill, FONT, 500))) * FONT))
+        parts.push(
+          `<text x="${(b.x + b.w / 2).toFixed(1)}" y="${b.y + b.h / 2 + fs * 0.35}" text-anchor="middle" font-size="${fs.toFixed(1)}" font-weight="500" fill="${c.student}">${esc(b.fill)}</text>`,
+        )
+      }
+      if (b.result === "wrong" && b.answer) {
+        labels.push(
+          `<text x="${(b.x + b.w / 2).toFixed(1)}" y="${b.y + b.h + 14}" text-anchor="middle" font-size="12" font-weight="600" fill="#FF3B30" stroke="${c.halo}" stroke-width="4" stroke-linejoin="round" paint-order="stroke">${esc(b.answer)}</text>`,
+        )
+      }
       continue
     }
     parts.push(

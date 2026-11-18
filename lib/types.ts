@@ -24,7 +24,13 @@ export type Answer = {
   createdAt: number
 }
 
-export type DiagramNode = { id: string; label: string; blank?: number } // blank = practice blank number (label hidden)
+export type DiagramNode = {
+  id: string
+  label: string
+  blank?: number // practice blank number (label hidden)
+  fill?: string // what the student typed into the blank
+  result?: "right" | "wrong" // set by "Check answers"
+}
 export type DiagramEdge = { from: string; to: string; label?: string }
 export type Diagram = {
   title: string
@@ -42,12 +48,16 @@ export type Card = {
   createdAt: number
 } & ({ type: "diagram"; diagram: Diagram } | { type: "note"; title: string; text: string })
 
+/** Text the student typed on the board (Text tool). Counts as their own writing for Analyze. */
+export type TextBox = { id: string; pos: { x: number; y: number }; text: string; size: number; createdAt: number }
+
 export type Board = {
   id: string
   name: string
   strokes: Stroke[]
   answers: Answer[]
   cards?: Card[]
+  texts?: TextBox[]
   inkVersion: number
   lastAnalyzedVersion: number
   updatedAt: number
