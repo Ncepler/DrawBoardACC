@@ -181,6 +181,11 @@ export default function Whiteboard() {
           break
         }
         failure = String(res.status)
+        try {
+          const e = ((await res.json()) as { error?: string }).error
+          if (e === "quota") failure = "Gemini quota exceeded, check API key billing"
+          else if (e === "rate_limited") failure = "too many requests, wait a minute"
+        } catch {}
         if (res.status < 500) break // client-side problem: retrying won't help
       } catch {
         if (ctrl.signal.aborted) break
@@ -194,7 +199,7 @@ export default function Whiteboard() {
     }
     if (ctrl.signal.aborted) return
     if (!items) {
-      if (manual) flash(`Couldn't analyze (${failure})`)
+      if (manual) flash(`Couldn't analyze: ${failure}`)
       return
     }
     if (manual && items.length === 0) flash("No question mark found")

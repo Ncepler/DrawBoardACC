@@ -115,7 +115,11 @@ export async function POST(req: Request) {
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey })
+    // SDK default is 5 retries with long backoff, which blows past the 30s function limit.
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: { timeout: 25_000, retryOptions: { attempts: 1 } },
+    })
     const res = await ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: [{ role: "user", parts: [{ inlineData: { mimeType: "image/png", data: image } }] }],
@@ -137,7 +141,9 @@ export async function POST(req: Request) {
     return json(sanitize(parsed))
   } catch (err) {
     // Error details only: never the image or any answer text.
-    console.error("gemini call failed:", String((err as Error)?.message ?? err).slice(0, 300))
+    const msg = String((err as Error)?.message ?? err)
+    console.error("gemini call failed:", msg.slice(0, 900))
+    if (/"code":\s*429|RESOURCE_EXHAUSTED/.test(msg)) return json({ error: "quota" }, 429)
     return json({ error: "upstream" }, 502)
   }
 }
