@@ -13,7 +13,6 @@ export default function Draggable({
   w,
   h,
   scale = 1,
-  keepSize = false,
   selected,
   onSelect,
   onMove,
@@ -30,8 +29,6 @@ export default function Draggable({
   h: number
   /** Board zoom (screen px per board px): pointer movement is divided by it, and tap targets stay 44 screen px. */
   scale?: number
-  /** When zoomed out, draw the item at its 100% size instead of shrinking it (positions still follow the zoom). */
-  keepSize?: boolean
   selected: boolean
   onSelect: () => void
   onMove: (x: number, y: number) => void
@@ -52,8 +49,7 @@ export default function Draggable({
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
   const left = drag?.x ?? x
   const top = drag?.y ?? y
-  const f = keepSize && scale < 1 ? 1 / scale : 1 // content scale that cancels the zoom-out
-  const es = scale * f // screen px per content px
+  const es = scale // screen px per board px
   const hit = Math.max(8, (44 - Math.min(w, h) * es) / 2) / es
 
   const finish = (e: React.PointerEvent) => {
@@ -76,8 +72,6 @@ export default function Draggable({
         width: w,
         height: h,
         cursor: drag ? "grabbing" : "grab",
-        transform: f === 1 ? undefined : `scale(${f})`,
-        transformOrigin: "0 0",
         filter: drag ? "drop-shadow(0 6px 14px rgba(0,0,0,0.18))" : undefined,
         zIndex: drag || selected ? 5 : undefined,
       }}

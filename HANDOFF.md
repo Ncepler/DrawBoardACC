@@ -24,7 +24,7 @@ See CLAUDE.md §0–§13. In short:
 - **Board:** unbounded with zoom/pan (2%–400%): +/−/reset under the gear, pinch and two-finger pan, scroll to pan, Ctrl/Cmd+scroll to zoom, Space+drag. View is per board, in memory only.
 - **Looks:** explanations are a typed card by default, other answers use a handwriting-looking font (falls back to a generic cursive off Apple devices); each answer has a typed/handwriting toggle. Zoomed out, text, answers and line thickness keep their 100% size. Move tool in the toolbar; paste or drop an image opens the Photo box.
 - **Settings:** light/dark, your-own-handwriting glyphs (letters, numbers, a "More symbols" tab, gray guide letters, undo), auto-analyze. Answers show exponents `^(…)` raised.
-- **Demos:** the `/demo` page.
+- **Demos:** the `/examples` page (`/?example=<id>`).
 
 ## Testing (what works in the container)
 
@@ -33,7 +33,7 @@ See CLAUDE.md §0–§13. In short:
 - **Browser tests:** run Playwright scripts against `npx next dev -p 3111`, launched with `NODE_PATH=$(npm root -g) node script.js`.
   - Mock the routes with `page.route('**/api/answer', …)` and `'**/api/create'`.
   - Seed state through localStorage: `ai-whiteboard:v1`, `ai-whiteboard:settings:v1` and `ai-whiteboard:glyphs:v1`.
-  - Use `/?demo=<id>` to open ready-made boards.
+  - Use `/?example=<id>` to open ready-made boards.
 - **Playwright selectors:** `text=Done` is a case-insensitive substring match, so prefer `getByRole('button', { name, exact: true })`.
 - **Pure helpers:** copy `lib/format.ts` or `lib/check.ts` to a temp dir and run `node --experimental-strip-types`.
 - **React compiler lint (`react-hooks/purity`) false positive:** an event handler that calls a function declared *later* in the component gets flagged as "impure function during render". Move the callee above the handler.
@@ -69,9 +69,9 @@ See CLAUDE.md §0–§13. In short:
 |---|---|
 | `app/api/answer/route.ts` | Board analysis prompt and schema, sanitizing by answer kind |
 | `app/api/create/route.ts` | Ask/Photo → note or diagram prompt and schema |
-| `app/demo/page.tsx` | Demo gallery; "Try it" → `/?demo=<id>` |
+| `app/examples/page.tsx` | Examples gallery; "Try it" → `/?example=<id>` |
 | `app/layout.tsx`, `app/globals.css` | Theme boot script, CSS variables (light/dark) |
-| `components/Whiteboard.tsx` | Main component: input, tools, analysis, undo, demos, settings wiring |
+| `components/Whiteboard.tsx` | Main component: input, tools, analysis, undo, examples, settings wiring |
 | `components/AnswerOverlay.tsx` | Answers/cards/typed text rendering, placement, renderers |
 | `components/Draggable.tsx` | Select / drag / delete wrapper (optional top-strip handle) |
 | `components/Composer.tsx` | Ask box (with photo preview) |
@@ -88,4 +88,4 @@ See CLAUDE.md §0–§13. In short:
 | `lib/glyphs.ts`, `lib/settings.ts` | Glyph sets and drawing; settings and user glyph storage |
 | `lib/ink.ts` | perfect-freehand strokes, eraser hit test |
 | `lib/check.ts` | Local practice-answer checker |
-| `lib/demos.ts`, `lib/photo.ts`, `lib/texts.ts`, `lib/measure.ts`, `lib/storage.ts`, `lib/theme.ts`, `lib/config.ts`, `lib/types.ts` | Helpers and data |
+| `lib/examples.ts`, `lib/shapes.ts`, `lib/photo.ts`, `lib/texts.ts`, `lib/measure.ts`, `lib/storage.ts`, `lib/theme.ts`, `lib/config.ts`, `lib/types.ts` | Helpers and data |

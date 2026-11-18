@@ -83,17 +83,19 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 
 ### In scope (built)
 - Full-screen whiteboard canvas with Apple-feel ink using Apple Pencil, finger, or mouse.
-- Left sidebar with boards (Board 1, Board 2, ...), add-board button, Demos link, show/hide toggle.
-- Floating toolbar: pen, eraser, Move (hand), undo, redo, clear board (undoable; also "Clear whole board" in the sidebar) | Text (T), Create (palette), Photo | Analyze.
-- Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause".
-- Unbounded board with zoom and pan: +, −, and a reset button (shows the zoom %) under the settings gear; two-finger drag pans and pinch zooms; scroll pans, Ctrl/Cmd+scroll or a trackpad pinch zooms; Space + mouse drag pans. Zoom runs 2%–400%. Each board remembers its own view in memory (not saved across refresh). Zoomed out, typed text, answers and line thickness keep their 100% size (only their positions follow the zoom); diagrams, notes and graphs shrink with the board so ink drawn on them stays aligned.
+- Left sidebar with boards (Board 1, Board 2, ...), add-board button, Examples link, show/hide toggle.
+- Floating toolbar: pen, eraser, Move (hand), undo, redo, clear board (red trash icon, undoable; the only clear button) | Shapes, Text (T), Create (palette), Photo | Analyze.
+- Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause", See examples.
+- Unbounded board with zoom and pan: +, −, and a reset button (shows the zoom %) under the settings gear; two-finger drag pans and pinch zooms; scroll pans, Ctrl/Cmd+scroll or a trackpad pinch zooms; Space + mouse drag pans. Zoom runs 2%–400%. Each board remembers its own view in memory (not saved across refresh). Zoomed out, line thickness keeps its 100% size; everything else (ink, typed text, answers, diagrams, notes, graphs) scales with the board, so nothing drifts relative to the writing.
 - Handwriting setup: each box shows a faint gray guide letter to trace (readable in light and dark), and an Undo button in the header undoes the last stroke across all characters.
 - Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
 - Paste an image (Cmd/Ctrl+V), drop one, or pick one with Photo: a popup asks "What do you want to do with this photo?" with two buttons, **Draw on it** (puts the photo on the board under the ink; grab strip along its top moves it, corner handle resizes, × deletes; saved in localStorage and included in the image sent to Gemini) or **Make a diagram** (opens the Create box with "Turn this into a diagram"; edit it to e.g. "solve this").
 - Create box and Photo → AI notes, diagrams (cycle / flow / tree layouts, optional numbered practice blanks) and function graphs (blank axes drawn by the app, curves plotted from formulas). "graph it" written on the board makes a graph too.
+- Shapes tool: pick a shape (square, rectangle, circle, oval, triangle, right triangle, diamond, pentagon, hexagon, star, line, arrow) from the palette above the toolbar, then drag on the board. Each shape is one ordinary stroke (`Stroke.shape`: constant width, sharp corners), so it can be erased, undone and is read by Analyze. The tool stays on until another is picked.
+- Geometry: for a drawn figure with an unknown angle or length, Gemini is told to answer with the value and a tight box around that unknown label or angle mark, so the answer lands at that angle. Untested against real Gemini.
 - Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".
 - Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable. Notes, diagrams and graphs also have a corner handle to resize (one undo step).
-- `/demo` page with ready-made demo boards.
+- `/examples` page with ready-made example boards (math, follow-ups, check my work, missing angle, word problem, fill the gap, explain, diagram, practice blanks, graph, photo); each opens as a new board via `/?example=<id>`.
 - Boards, settings, and handwriting glyphs persisted in localStorage.
 
 ### Out of scope (do not build, do not stub)
@@ -141,14 +143,14 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 
 ### Layout
 - Canvas fills the viewport (`position: fixed; inset: 0`; safe-area insets on all floating chrome). Board color and ink color follow the theme.
-- Top left: sidebar toggle (always reachable) and the translucent boards sidebar (boards, Add board, Demos). The sidebar floats over the canvas, so toggling never resizes the canvas.
-- Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, demos). Zoom controls sit in a small vertical pill just under it.
-- Bottom center toolbar: pen, eraser (whole-stroke), Move (hand: drag the board with any pointer), undo, redo, clear board (one Undo restores it) | Text (T), Create (palette), Photo | Analyze. Nothing else.
+- Top left: sidebar toggle (always reachable) and the translucent boards sidebar (boards, Add board, Examples). The sidebar floats over the canvas, so toggling never resizes the canvas.
+- Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, examples). Zoom controls sit in a small vertical pill just under it.
+- Bottom center toolbar: pen, eraser (whole-stroke), Move (hand: drag the board with any pointer), undo, redo, clear board (red trash icon; one Undo restores it) | Shapes, Text (T), Create (palette), Photo | Analyze. Nothing else.
 - Small notices appear top center (e.g. "Nothing to answer found", "Couldn't analyze: …", "2 of 3 right").
 - All tap targets at least 44px. No hover-only UI, no right-click, nothing that only works with a mouse (keyboard shortcuts are extras: Enter = Analyze, Delete = delete selection, Escape = deselect).
 
 ### Tools and items
-- **Create** (palette button): opens the Create box in the middle of the screen (same box as the demo's "make it for me"), type, Create. Undo right after a creation removes the card and reopens the box with the same prompt (and photo) to edit; Redo brings the card back. A "Thinking…" placeholder shows while Gemini works; the result is placed at the nearest free spot.
+- **Create** (palette button): opens the Create box in the middle of the screen (same box as the examples' "make it for me"), type, Create. Undo right after a creation removes the card and reopens the box with the same prompt (and photo) to edit; Redo brings the card back. A "Thinking…" placeholder shows while Gemini works; the result is placed at the nearest free spot.
 - **Photo**: pick or take a photo (downscaled to ≤1600 px JPEG in the browser), optionally change the request (default "Turn this into a diagram"), Create.
 - **Text (T)**: click empty board to type (Enter saves, Shift+Enter new line, the box grows with its text); click a practice blank to type its answer; click typed text to edit. Clicking away saves, and that click only closes the box (it never opens another). The tool stays on until another tool is picked.
 - A pen or mouse can draw right up to an answer's edge; only a finger gets the enlarged grab area.
@@ -201,7 +203,7 @@ Eraser: removes whole strokes whose geometry the eraser path intersects (stroke-
 
 ```ts
 type Point = { x: number; y: number; p: number; t: number }
-type Stroke = { id; points: Point[]; tool: "pen"; width; color; real: boolean /* real pen pressure */; createdAt }
+type Stroke = { id; points: Point[]; tool: "pen"; width; color; real: boolean /* real pen pressure */; shape?: boolean /* from the Shapes tool */; createdAt }
 
 type AnswerKind = "math" | "term" | "explain" | "check"
 type Answer = {
