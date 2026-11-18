@@ -47,7 +47,7 @@ Noah's own priority order is software first. Hardware is far-future and depends 
 
 Phases and where they stand:
 1. Mockup loop: answers on the board, boards, Apple-feel ink. **Built.**
-2. Answers in the user's own handwriting. **Started:** per-character handwriting capture in Settings; answers whose characters all have glyphs are drawn with them. Not yet: connected cursive, natural spacing/jitter, learning from normal writing.
+2. Answers in the user's own handwriting. **Started:** per-character handwriting capture in Settings (74 characters); with the setting on, every answer is drawn with those glyphs, and any missing character is typeset. Not yet: connected cursive, natural spacing/jitter, multiple samples per character, learning from normal writing.
 3. Practice mode: diagrams with blanks, the user fills them in, the app checks them. **Built (first version):** Ask for "… with N blanks"; fill by pen (checked by Gemini via Analyze) or by typing (checked locally by "Check answers").
 4. Photo of a real whiteboard / textbook figure. **Built (first version):** Photo button → diagram or note.
 5. Possibly: iPad-optimized app, then hardware.
@@ -107,7 +107,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 | No question mark required: Gemini decides what to respond to | Noah's request; a "?" still works |
 | Answer kinds with caps: math ≤10 words, term ≤6 words, explain ≤60 words (2–3 sentences), check ≤8 words; enforced in the Gemini instruction AND in code | Short where it must fit beside the work; explanations when asked ("Krebs cycle:?", "Explain X") |
 | Math answers are plain text, never LaTeX; "=" is added when the student didn't write one | Raw `\frac{}` was showing; "2500+10" should read "= 2510" |
-| Numbers/simple math are drawn as pen strokes; other answers as text; explanations as a card | Noah's request ("drawn on, start with numbers") |
+| Handwriting off: numbers/simple math drawn as pen strokes, other answers as text, explanations as a card. Handwriting on: every answer drawn in the user's handwriting | Noah's request ("drawn on", "answer in my own handwriting") |
 | Handwriting: user writes each character once in Settings; glyphs behind a `GlyphSet` interface | Phase 2 starting point; renderer swappable |
 | Gemini analyzes a screenshot of the board | Noah's choice of model provider |
 | Drawing must feel like Apple's ink (Notes/Freeform) | Pen feel is a top priority |
@@ -175,7 +175,7 @@ Goal: strokes that look and feel like Apple Pencil in Notes/Freeform: smooth, no
 - **Canvases:** two of them, committed ink plus the live stroke. Each is sized by devicePixelRatio (capped at 3 and at 16M pixels) and redrawn from vectors on resize, board switch, undo and erase.
 - **Not yet checked:** none of these numbers have been tuned on an iPad.
 
-The build prompt requires a research step first (a subagent investigates Apple's PencilKit/Notes feel and the web equivalents and reports a short summary). Decisions about smoothing, width range, and pressure curve come from that research; record them in the final report. Starting hypotheses to verify, not facts to assume:
+Original research notes (kept for context; the values above are what was chosen):
 - Variable-width smooth strokes via a freehand-stroke approach (for example the `perfect-freehand` library) are likely closer to Apple's feel than raw line segments. Evaluate before committing; if added, state it in the report.
 - Pressure (0–1) from Pointer Events should modulate width; finger input has no real pressure and needs a speed-based fallback.
 - Use `getCoalescedEvents()` for full-rate points. `getPredictedEvents()` can hide latency but Safari support must be checked; feature-detect and degrade gracefully.
@@ -189,7 +189,7 @@ iPad Safari gotchas to handle deliberately:
 - 100vh vs dynamic viewport behavior; safe-area insets.
 - Palm rejection: while a pen pointer is down or recently active, ignore touch pointers. Pencil hover (on supported iPads) must not draw.
 
-Eraser: removes whole strokes whose geometry the eraser path intersects (stroke-level erase, not pixel erase). Undo reverses the last stroke add or erase.
+Eraser: removes whole strokes whose geometry the eraser path intersects (stroke-level erase, not pixel erase). Undo reverses the last action (see section 10).
 
 ---
 
@@ -254,7 +254,7 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 ### Correctness rules
 - Wrong answers are worse than no answer. Prefer `low` confidence over guessing; low confidence is shown muted.
 - If the model answers a different subject than the board's, that is a failure to report, not something to hide.
-- Prompts have only been tested with mocked responses, plus a few live math/explain runs by Noah. Tune them against real outputs when possible.
+- Prompts have only been tested with mocked responses, plus a few live runs by Noah (math, "explain photosynthesis" worked). Tune them against real outputs when possible (see HANDOFF.md for how to test with a real key).
 
 ### Cost, abuse, and privacy
 - Origin check + in-memory rate limit (speed bump only; serverless instances don't share memory) + body cap. No passcode yet.
@@ -266,7 +266,7 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 
 - One DOM overlay above the ink canvases holds answers, AI cards, typed text, editors and the Ask box. It is never part of the image sent to Gemini (practice diagrams are re-rendered in gray for the export).
 - Answer placement: to the right of the answered box, then below, left, above; on-screen; avoiding other answers and cards. Text size follows the height of what was written, capped (text ≤44 px, drawn ≤110 px) and shrunk to fit the screen width.
-- Renderers sit behind `AnswerRenderer { measure(answer, maxW); renderAnswer(answer, maxW) }`: ink (glyphs), text pill, explain card. `makeDefaultRenderer(glyphSet, color)` picks one per answer.
+- Renderers sit behind `AnswerRenderer { measure(answer, maxW); renderAnswer(answer, maxW) }`: ink (glyphs), text pill, explain card. `makeDefaultRenderer(glyphSet, color, handwriting)` picks one per answer.
 - Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × / ( ) . x y`, a space, and superscripts.
 - With "Write answers in my handwriting" on and at least one glyph set up, EVERY answer (explanations included) is drawn with the user's glyphs. Long answers wrap onto several lines.
   - Sub/superscript digits are drawn with the user's own digits, scaled and shifted.
@@ -339,6 +339,7 @@ If it passes: build the live practice mode and handwriting output next. Hardware
 - Honest reporting only. If something fails, is untestable on this machine, or you disagree with a decision here, say so plainly. No sugarcoating and no invented problems.
 - Keep reports condensed: a table of files and what they do (under fifteen words each), a short "decisions" list, a short "flagged" list. No essays, no next-steps lists.
 - Minimal diffs. Match existing patterns in the repo. Do not refactor, rename, or reorganize what you weren't asked to touch.
+- Read HANDOFF.md at the start of a new session for current state and open items.
 - No tests, README, or docs changes unless asked. Keep this CLAUDE.md in sync when Noah changes a decision. No new dependencies unless required; if you add one (for example a stroke library), say why in the report.
 - Do not create extra pages, admin screens, or config unless the task requires it.
 - Run the build once at the end of a task, not per file. Run the dev server only to catch obvious errors.
