@@ -12,15 +12,23 @@ export type AnswerRenderer = {
   renderAnswer(answer: Answer, pos: { left: number; top: number }): ReactNode
 }
 
+/** Font size that matches the handwriting: scales with the height of the drawn "?". */
+export function answerFontSize(answer: Answer) {
+  return Math.round(Math.min(120, Math.max(14, answer.box.h / 0.72)))
+}
+
 export const textAnswerRenderer: AnswerRenderer = {
   renderAnswer(answer, pos) {
     return (
       <div
         key={answer.id}
-        className="absolute whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-medium leading-none"
+        className="absolute whitespace-nowrap font-medium leading-none"
         style={{
           left: pos.left,
           top: pos.top,
+          fontSize: answerFontSize(answer),
+          padding: "0.12em 0.35em",
+          borderRadius: "0.3em",
           color: ANSWER_COLOR,
           background: "rgba(255,255,255,0.88)",
           boxShadow: "0 0 0 0.5px rgba(0,122,255,0.35), 0 1px 4px rgba(0,0,0,0.08)",
@@ -35,11 +43,11 @@ export const textAnswerRenderer: AnswerRenderer = {
 }
 
 type Rect = { left: number; top: number; w: number; h: number }
-const H = 26
 const GAP = 8
 
-function estimateWidth(text: string) {
-  return Math.round(text.length * 7.4 + 22)
+function estimateSize(a: Answer) {
+  const fs = answerFontSize(a)
+  return { w: Math.round(a.text.length * fs * 0.58 + fs * 0.7), h: Math.round(fs * 1.25) }
 }
 
 const overlaps = (a: Rect, b: Rect) =>
@@ -50,7 +58,7 @@ function place(answers: Answer[], vw: number, vh: number) {
   const placed: Rect[] = []
   const out = new Map<string, { left: number; top: number }>()
   for (const a of answers) {
-    const w = estimateWidth(a.text)
+    const { w, h: H } = estimateSize(a)
     const { x, y, w: bw, h: bh } = a.box
     const midY = y + bh / 2 - H / 2
     const midX = x + bw / 2 - w / 2

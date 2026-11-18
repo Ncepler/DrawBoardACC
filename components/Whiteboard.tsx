@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import AnswerOverlay from "./AnswerOverlay"
 import Sidebar from "./Sidebar"
 import Toolbar, { type Tool } from "./Toolbar"
-import { exportInkPng, mergeAnswers } from "@/lib/analysis"
+import { exportInkPng, mergeAnswers, pruneAnswers } from "@/lib/analysis"
 import { AUTO_ANALYZE, ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
 import { initialState, loadState, newBoard, saveState } from "@/lib/storage"
@@ -322,7 +322,12 @@ export default function Whiteboard() {
     if (!hit.length) return
     const ids = new Set(hit.map((h) => h.stroke.id))
     d.erased.push(...hit)
-    patchBoard(board.id, (b) => ({ ...b, strokes: b.strokes.filter((s) => !ids.has(s.id)) }))
+    const gone = hit.map((h) => h.stroke)
+    patchBoard(board.id, (b) => ({
+      ...b,
+      strokes: b.strokes.filter((s) => !ids.has(s.id)),
+      answers: pruneAnswers(b.answers, gone),
+    }))
     redrawInk()
   }
 
@@ -451,14 +456,17 @@ export default function Whiteboard() {
     if (!action) return
     patchBoard(board.id, (b) => {
       let strokes = b.strokes
-      if (action.type === "add") strokes = strokes.filter((s) => s.id !== action.stroke.id)
-      else {
+      let answers = b.answers
+      if (action.type === "add") {
+        strokes = strokes.filter((s) => s.id !== action.stroke.id)
+        answers = pruneAnswers(answers, [action.stroke])
+      } else {
         strokes = [...strokes]
         for (const it of [...action.items].sort((a, c) => a.index - c.index)) {
           strokes.splice(Math.min(it.index, strokes.length), 0, it.stroke)
         }
       }
-      return { ...b, strokes, inkVersion: b.inkVersion + 1, updatedAt: Date.now() }
+      return { ...b, strokes, answers, inkVersion: b.inkVersion + 1, updatedAt: Date.now() }
     })
     redrawInk()
     syncUndo()
