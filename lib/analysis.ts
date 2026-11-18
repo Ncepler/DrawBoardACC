@@ -83,3 +83,26 @@ export function mergeAnswers(
     }
   })
 }
+
+/**
+ * Drops answers whose surroundings lost ink (erased or undone). An answer is
+ * derived from the "?" and the ink around it, so once that ink is gone the
+ * answer is stale and wrong answers are worse than none.
+ */
+export function pruneAnswers(answers: Answer[], removed: Stroke[]): Answer[] {
+  if (!answers.length || !removed.length) return answers
+  const boxes = removed.map((s) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const p of s.points) {
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y)
+      x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y)
+    }
+    return { x0, y0, x1, y1 }
+  })
+  return answers.filter((a) => {
+    const m = Math.max(100, 1.5 * Math.max(a.box.w, a.box.h))
+    const ax0 = a.box.x - m, ay0 = a.box.y - m
+    const ax1 = a.box.x + a.box.w + m, ay1 = a.box.y + a.box.h + m
+    return !boxes.some((b) => b.x0 <= ax1 && b.x1 >= ax0 && b.y0 <= ay1 && b.y1 >= ay0)
+  })
+}
