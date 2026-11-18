@@ -212,12 +212,12 @@ const GAP = 8
 const overlaps = (a: Rect, b: Rect) =>
   a.left < b.left + b.w && a.left + a.w > b.left && a.top < b.top + b.h && a.top + a.h > b.top
 
-/** Prefer right of what it answers, then below, left, above; stay on-screen, avoid other items. */
-export function placeAnswers(answers: Answer[], cards: Card[], vw: number, vh: number, renderer: AnswerRenderer) {
+/** Prefer right of what it answers, then below, left, above; avoid other items. */
+export function placeAnswers(answers: Answer[], cards: Card[], maxW: number, renderer: AnswerRenderer) {
   const placed: Rect[] = cards.map((c) => ({ left: c.pos.x, top: c.pos.y, ...cardSize(c) }))
   const out = new Map<string, Rect>()
   for (const a of answers) {
-    const { w, h: H } = renderer.measure(a, vw - 16)
+    const { w, h: H } = renderer.measure(a, maxW)
     if (a.pos) {
       const r = { left: a.pos.x, top: a.pos.y, w, h: H }
       placed.push(r)
@@ -232,16 +232,8 @@ export function placeAnswers(answers: Answer[], cards: Card[], vw: number, vh: n
       { left: x - GAP - w, top: midY, w, h: H },
       { left: x, top: y - GAP - H, w, h: H },
     ]
-    const inBounds = (r: Rect) => r.left >= 4 && r.top >= 4 && r.left + r.w <= vw - 4 && r.top + r.h <= vh - 4
-    let chosen = candidates.find((r) => inBounds(r) && !placed.some((p) => overlaps(r, p)))
-    if (!chosen) {
-      const c = candidates[0]
-      chosen = {
-        ...c,
-        left: Math.min(Math.max(4, c.left), Math.max(4, vw - w - 4)),
-        top: Math.min(Math.max(4, c.top), Math.max(4, vh - H - 4)),
-      }
-    }
+    // The board is unbounded, so there is no screen edge to stay inside: take the first free side.
+    const chosen = candidates.find((r) => !placed.some((p) => overlaps(r, p))) ?? candidates[0]
     placed.push(chosen)
     out.set(a.id, chosen)
   }
@@ -312,7 +304,7 @@ export default function AnswerOverlay({
   editingTextId,
   pending,
   width,
-  height,
+  scale,
   selected,
   onSelect,
   onMoveAnswer,
@@ -332,8 +324,8 @@ export default function AnswerOverlay({
   texts: TextBox[]
   editingTextId: string | null
   pending: { id: string; x: number; y: number }[]
-  width: number
-  height: number
+  width: number // screen width, used only to cap answer size
+  scale: number // board zoom
   selected: Selection
   onSelect: (s: Selection) => void
   onMoveAnswer: (id: string, x: number, y: number) => void
@@ -349,11 +341,10 @@ export default function AnswerOverlay({
   handwriting?: boolean
 }) {
   const renderer = makeDefaultRenderer(glyphs, aiColor, handwriting)
-  const positions = placeAnswers(answers, cards, width, height, renderer)
+  const positions = placeAnswers(answers, cards, width - 16, renderer)
   const maxW = width - 16
-  const bounds = { w: width, h: height }
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-live="polite">
+    <div className="pointer-events-none absolute left-0 top-0" aria-live="polite">
       {cards.map((c) => {
         const { w, h } = cardSize(c)
         const sel = selected?.type === "card" && selected.id === c.id
@@ -364,7 +355,7 @@ export default function AnswerOverlay({
             y={c.pos.y}
             w={w}
             h={h}
-            bounds={bounds}
+            scale={scale}
             selected={sel}
             onSelect={() => onSelect(sel ? null : { type: "card", id: c.id })}
             onMove={(x, y) => onMoveCard(c.id, x, y)}
@@ -376,7 +367,7 @@ export default function AnswerOverlay({
               <button
                 type="button"
                 className="pointer-events-auto absolute left-0 flex h-11 items-center rounded-full bg-[#007AFF] px-4 text-[15px] font-medium text-white shadow [touch-action:manipulation] active:opacity-80"
-                style={{ top: h + 8 }}
+                style={{ top: h + 8, transform: `scale(${1 / scale})`, transformOrigin: "0 0" }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onPointerUp={(e) => e.stopPropagation()}
                 onClick={(e) => {
@@ -400,7 +391,7 @@ export default function AnswerOverlay({
             y={r.top}
             w={r.w}
             h={r.h}
-            bounds={bounds}
+            scale={scale}
             selected={sel}
             onSelect={() => onSelect(sel ? null : { type: "answer", id: a.id })}
             onMove={(x, y) => onMoveAnswer(a.id, x, y)}
@@ -421,7 +412,7 @@ export default function AnswerOverlay({
             y={t.pos.y}
             w={w}
             h={h}
-            bounds={bounds}
+            scale={scale}
             selected={sel}
             // tap a selected box (or any box with the Text tool) to edit it
             onSelect={() => (sel || textTool ? onEditText(t.id) : onSelect({ type: "text", id: t.id }))}
@@ -436,7 +427,7 @@ export default function AnswerOverlay({
         <div
           key={p.id}
           className="absolute flex items-center gap-2 rounded-full bg-[var(--chrome-strong)] px-3 py-2 text-[14px] text-[var(--ai-text)] shadow-[0_0_0_0.5px_var(--ai-ring),0_2px_10px_rgba(0,0,0,0.08)]"
-          style={{ left: p.x, top: p.y }}
+          style={{ left: p.x, top: p.y, transform: `scale(${1 / scale})`, transformOrigin: "0 0" }}
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" />
           Thinking…

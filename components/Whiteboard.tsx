@@ -66,10 +66,18 @@ type Drawing = {
 
 const MAX_BUFFER_PIXELS = 16_000_000
 
+/** Board-space rectangle that is on screen, plus the zoom it was computed at. */
+type Rect = { x: number; y: number; w: number; h: number; k: number }
+/** How the board sits on screen: screen = board * k + (x, y). */
+type View = { x: number; y: number; k: number }
+const MIN_ZOOM = 0.02
+const MAX_ZOOM = 4
+const clampZoom = (k: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, k))
+
 /** Nearest spot to `at` (spiralling out) where a w×h card overlaps no other card or answer. */
-function freeSpot(at: { x: number; y: number }, w: number, h: number, vw: number, vh: number, board?: Board) {
-  const clampX = (x: number) => Math.min(Math.max(8, x), Math.max(8, vw - w - 8))
-  const clampY = (y: number) => Math.min(Math.max(8, y), Math.max(8, vh - h - 90))
+function freeSpot(at: { x: number; y: number }, w: number, h: number, vis: Rect, board?: Board) {
+  const clampX = (x: number) => Math.min(Math.max(vis.x + 8, x), Math.max(vis.x + 8, vis.x + vis.w - w - 8))
+  const clampY = (y: number) => Math.min(Math.max(vis.y + 8, y), Math.max(vis.y + 8, vis.y + vis.h - h - 90 / vis.k))
   const taken = [
     ...(board?.cards ?? []).map((c) => ({ x: c.pos.x, y: c.pos.y, ...cardSize(c) })),
     ...(board?.answers ?? []).map((a) => (a.pos ? { ...a.box, x: a.pos.x, y: a.pos.y } : a.box)),
@@ -140,6 +148,14 @@ export default function Whiteboard() {
   const [panel, setPanel] = useState<"settings" | "handwriting" | null>(null)
   const [dark, setDark] = useState(false)
   const inkColor = useRef(THEME.light.ink)
+  const [view, setViewState] = useState<View>({ x: 0, y: 0, k: 1 })
+  const viewRef = useRef<View>({ x: 0, y: 0, k: 1 })
+  const viewsRef = useRef(new Map<string, View>()) // each board remembers its own view (in memory)
+  const redrawRaf = useRef(0)
+  const touchPos = useRef(new Map<number, { x: number; y: number }>())
+  const gesture = useRef<{ ids: [number, number]; mid0: { x: number; y: number }; dist0: number; v0: View } | null>(null)
+  const panDrag = useRef<{ pointerId: number; sx: number; sy: number; v0: View } | null>(null)
+  const spaceDown = useRef(false)
 
   const stateRef = useRef<AppState | null>(null)
   const toolRef = useRef<Tool>("pen")
@@ -191,9 +207,39 @@ export default function Whiteboard() {
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     if (!board) return
     const d = dprRef.current
-    ctx.setTransform(d, 0, 0, d, 0, 0)
+    const v = viewRef.current
+    ctx.setTransform(d * v.k, 0, 0, d * v.k, d * v.x, d * v.y)
     for (const s of board.strokes) drawStroke(ctx, { ...s, color: inkColor.current })
   }, [activeBoard])
+
+  /** Moves the board under the screen (pan/zoom). Redraws the ink at most once per frame. */
+  const setView = useCallback(
+    (v: View) => {
+      const nv = { x: v.x, y: v.y, k: clampZoom(v.k) }
+      viewRef.current = nv
+      setViewState(nv)
+      const id = stateRef.current?.activeBoardId
+      if (id) viewsRef.current.set(id, nv)
+      if (!redrawRaf.current)
+        redrawRaf.current = requestAnimationFrame(() => {
+          redrawRaf.current = 0
+          redrawInk()
+        })
+    },
+    [redrawInk],
+  )
+
+  /** Zoom to `k`, keeping the board point under screen (sx, sy) where it is. */
+  const zoomAt = useCallback(
+    (sx: number, sy: number, k: number) => {
+      const v = viewRef.current
+      const nk = clampZoom(k)
+      const bx = (sx - v.x) / v.k
+      const by = (sy - v.y) / v.k
+      setView({ k: nk, x: sx - bx * nk, y: sy - by * nk })
+    },
+    [setView],
+  )
 
   const clearLive = useCallback(() => {
     const c = liveRef.current
@@ -210,7 +256,8 @@ export default function Whiteboard() {
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     if (!d?.stroke) return
     const dpr = dprRef.current
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    const v = viewRef.current
+    ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y)
     const pts = d.predicted.length ? [...d.stroke.points, ...d.predicted] : d.stroke.points
     const path = strokePath(pts, d.stroke.real, d.stroke.width, false)
     ctx.fillStyle = inkColor.current
@@ -269,7 +316,7 @@ export default function Whiteboard() {
     let exported
     try {
       const rects = rendererRef.current
-        ? [...placeAnswers(board.answers, board.cards ?? [], w, h, rendererRef.current)].flatMap(([id, r]) => {
+        ? [...placeAnswers(board.answers, board.cards ?? [], w - 16, rendererRef.current)].flatMap(([id, r]) => {
             const a = board.answers.find((x) => x.id === id)
             return a ? [{ text: a.text, kind: a.kind, left: r.left, top: r.top, w: r.w, h: r.h }] : []
           })
@@ -458,6 +505,41 @@ export default function Whiteboard() {
     }
   }, [hydrated, redrawInk])
 
+  // Scroll pans; Ctrl/Cmd + scroll (or a trackpad pinch) zooms around the cursor.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host || !hydrated) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      if (drawing.current) return
+      const line = e.deltaMode === 1 ? 16 : 1
+      const dx = e.deltaX * line
+      const dy = e.deltaY * line
+      const v = viewRef.current
+      if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, v.k * Math.exp(-dy * 0.01))
+      else setView({ ...v, x: v.x - dx, y: v.y - dy })
+    }
+    host.addEventListener("wheel", onWheel, { passive: false })
+    const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement | null)?.closest?.("input, textarea")
+    const down = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !typing(e)) {
+        spaceDown.current = true
+        // a focused button keeps its own Space behavior
+        if (!(e.target as HTMLElement | null)?.closest?.("button")) e.preventDefault()
+      }
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") spaceDown.current = false
+    }
+    window.addEventListener("keydown", down)
+    window.addEventListener("keyup", up)
+    return () => {
+      host.removeEventListener("wheel", onWheel)
+      window.removeEventListener("keydown", down)
+      window.removeEventListener("keyup", up)
+    }
+  }, [hydrated, setView, zoomAt])
+
   // ---------- demo boards (/?demo=<id> from the demo page) ----------
   const demoDone = useRef(false)
   useEffect(() => {
@@ -487,6 +569,9 @@ export default function Whiteboard() {
 
   const activeId = state?.activeBoardId
   useEffect(() => {
+    const v = (activeId && viewsRef.current.get(activeId)) || { x: 0, y: 0, k: 1 }
+    viewRef.current = v
+    setViewState(v)
     redrawInk()
     syncUndo()
   }, [activeId, dark, redrawInk, syncUndo])
@@ -494,9 +579,19 @@ export default function Whiteboard() {
   useEffect(() => () => cancelAnalysis(), [cancelAnalysis])
 
   // ---------- pointer input ----------
+  /** Screen position -> board coordinates. */
+  const toBoard = (sx: number, sy: number) => {
+    const v = viewRef.current
+    return { x: (sx - v.x) / v.k, y: (sy - v.y) / v.k }
+  }
+  const visibleRect = (): Rect => {
+    const v = viewRef.current
+    const { w, h } = sizeRef.current
+    return { x: -v.x / v.k, y: -v.y / v.k, w: w / v.k, h: h / v.k, k: v.k }
+  }
+
   const pointOf = (e: PointerEvent | React.PointerEvent, rect: DOMRect, real: boolean): Point => ({
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top,
+    ...toBoard(e.clientX - rect.left, e.clientY - rect.top),
     p: real ? e.pressure : 0.5,
     t: Math.round(e.timeStamp),
   })
@@ -511,7 +606,7 @@ export default function Whiteboard() {
     if (!board) return
     const hit: { stroke: Stroke; index: number }[] = []
     board.strokes.forEach((s, index) => {
-      if (segmentHitsStroke(s, ax, ay, bx, by, ERASER_RADIUS)) hit.push({ stroke: s, index })
+      if (segmentHitsStroke(s, ax, ay, bx, by, ERASER_RADIUS / viewRef.current.k)) hit.push({ stroke: s, index })
     })
     if (!hit.length) return
     const ids = new Set(hit.map((h) => h.stroke.id))
@@ -553,6 +648,13 @@ export default function Whiteboard() {
     const isTouch = e.pointerType === "touch"
     setSelected(null)
 
+    // Space + drag with a mouse pans the board.
+    if (spaceDown.current && e.pointerType === "mouse") {
+      e.currentTarget.setPointerCapture(e.pointerId)
+      panDrag.current = { pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, v0: viewRef.current }
+      return
+    }
+
     if (editor) {
       // preventDefault below would keep focus in the box, so save it explicitly.
       ;(document.activeElement as HTMLElement | null)?.blur()
@@ -565,7 +667,7 @@ export default function Whiteboard() {
       // and iPad only shows the keyboard when focus happens inside the tap.
       e.preventDefault()
       const rect = e.currentTarget.getBoundingClientRect()
-      askTap.current = { pointerId: e.pointerId, x: e.clientX - rect.left, y: e.clientY - rect.top, tool: toolRef.current }
+      askTap.current = { pointerId: e.pointerId, ...toBoard(e.clientX - rect.left, e.clientY - rect.top), tool: toolRef.current }
       return
     }
 
@@ -574,9 +676,21 @@ export default function Whiteboard() {
       if (drawing.current?.touch) cancelDrawing() // palm/finger stroke loses to the pen
     } else if (isTouch) {
       touches.current.add(e.pointerId)
+      touchPos.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       if (penDown.current || now < penUntil.current) return // palm rejection
       if (touches.current.size > 1) {
-        if (drawing.current?.touch) cancelDrawing() // multi-touch gesture: not a stroke
+        if (drawing.current?.touch) cancelDrawing() // two fingers: pan and pinch-zoom, not a stroke
+        if (!gesture.current) {
+          const [a, b] = [...touchPos.current.entries()].slice(0, 2)
+          if (a && b) {
+            gesture.current = {
+              ids: [a[0], b[0]],
+              mid0: { x: (a[1].x + b[1].x) / 2, y: (a[1].y + b[1].y) / 2 },
+              dist0: Math.max(10, Math.hypot(a[1].x - b[1].x, a[1].y - b[1].y)),
+              v0: viewRef.current,
+            }
+          }
+        }
         return
       }
     }
@@ -614,6 +728,25 @@ export default function Whiteboard() {
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "pen") penUntil.current = performance.now() + PEN_REJECT_MS // includes hover
+    const pd = panDrag.current
+    if (pd && pd.pointerId === e.pointerId) {
+      setView({ ...pd.v0, x: pd.v0.x + e.clientX - pd.sx, y: pd.v0.y + e.clientY - pd.sy })
+      return
+    }
+    if (e.pointerType === "touch" && touchPos.current.has(e.pointerId)) {
+      touchPos.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      const g = gesture.current
+      const a = g && touchPos.current.get(g.ids[0])
+      const b = g && touchPos.current.get(g.ids[1])
+      if (g && a && b) {
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+        const nk = clampZoom((g.v0.k * Math.hypot(a.x - b.x, a.y - b.y)) / g.dist0)
+        const bx = (g.mid0.x - g.v0.x) / g.v0.k
+        const by = (g.mid0.y - g.v0.y) / g.v0.k
+        setView({ k: nk, x: mid.x - bx * nk, y: mid.y - by * nk })
+        return
+      }
+    }
     const d = drawing.current
     if (!d || d.pointerId !== e.pointerId) return
     const rect = e.currentTarget.getBoundingClientRect()
@@ -647,6 +780,12 @@ export default function Whiteboard() {
       penUntil.current = performance.now() + PEN_REJECT_MS
     }
     touches.current.delete(e.pointerId)
+    touchPos.current.delete(e.pointerId)
+    if (gesture.current?.ids.includes(e.pointerId)) gesture.current = null
+    if (panDrag.current?.pointerId === e.pointerId) {
+      panDrag.current = null
+      return
+    }
     const tap = askTap.current
     if (tap && tap.pointerId === e.pointerId) {
       askTap.current = null
@@ -676,7 +815,9 @@ export default function Whiteboard() {
       const stroke = d.stroke
       const ctx = inkRef.current?.getContext("2d")
       if (ctx) {
-        ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0)
+        const v = viewRef.current
+        const dpr = dprRef.current
+        ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y)
         drawStroke(ctx, { ...stroke, color: inkColor.current })
       }
       clearLive()
@@ -843,11 +984,11 @@ export default function Whiteboard() {
         return
       }
       const payload = data.card
-      const { w: vw, h: vh } = sizeRef.current
-      const scale = fitScale(payload, vw, vh)
+      const vis = visibleRect()
+      const scale = fitScale(payload, vis.w, vis.h)
       const nat = naturalSize(payload)
       const cur = stateRef.current?.boards.find((b) => b.id === board.id)
-      const { x, y } = freeSpot(at, nat.w * scale, nat.h * scale, vw, vh, cur)
+      const { x, y } = freeSpot(at, nat.w * scale, nat.h * scale, vis, cur)
       const card = { ...payload, id: crypto.randomUUID(), pos: { x, y }, scale, prompt, source, createdAt: Date.now() } as Card
       patchBoard(board.id, (b) => ({ ...b, cards: [...(b.cards ?? []), card] }))
       pushUndo(board.id, { type: "card-add", card })
@@ -875,7 +1016,8 @@ export default function Whiteboard() {
     try {
       const photo = await photoToJpeg(file)
       const { w, h } = sizeRef.current
-      setComposer({ x: Math.max(12, w / 2 - 170), y: Math.max(12, h / 2 - 160), prompt: "Turn this into a diagram", photo })
+      const at = toBoard(Math.max(12, w / 2 - 170), Math.max(12, h / 2 - 160))
+      setComposer({ x: at.x, y: at.y, prompt: "Turn this into a diagram", photo })
     } catch {
       flash("Couldn't read that photo")
     }
@@ -980,12 +1122,16 @@ export default function Whiteboard() {
       >
         <canvas ref={inkRef} className="absolute inset-0 h-full w-full" />
         <canvas ref={liveRef} className="absolute inset-0 h-full w-full" />
+        <div
+          className="absolute left-0 top-0 origin-top-left"
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
+        >
         <AnswerOverlay
           answers={board.answers}
           cards={board.cards ?? []}
           pending={pending.filter((p) => p.boardId === board.id)}
           width={size.w}
-          height={size.h}
+          scale={view.k}
           selected={selected}
           onSelect={setSelected}
           onMoveAnswer={moveAnswer}
@@ -1010,11 +1156,12 @@ export default function Whiteboard() {
             onCancel={() => setEditor(null)}
           />
         )}
+        </div>
         {composer && (
           <Composer
             key={`${composer.x},${composer.y}`}
-            x={composer.x}
-            y={composer.y}
+            x={composer.x * view.k + view.x}
+            y={composer.y * view.k + view.y}
             bounds={size}
             initialPrompt={composer.prompt}
             photo={composer.photo?.dataUrl ?? null}
@@ -1061,6 +1208,22 @@ export default function Whiteboard() {
           <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" />
         </svg>
       </button>
+      <div
+        className="absolute z-30 flex flex-col items-center gap-0.5 rounded-full border border-[var(--hairline)] bg-[var(--chrome)] p-0.5 text-[var(--text)] shadow-[0_4px_24px_rgba(0,0,0,0.12)] backdrop-blur-xl select-none"
+        style={{ right: "calc(12px + env(safe-area-inset-right))", top: "calc(68px + env(safe-area-inset-top))" }}
+        role="group"
+        aria-label="Zoom"
+      >
+        <button type="button" aria-label="Zoom in" className="flex h-11 w-11 items-center justify-center rounded-full [touch-action:manipulation] active:bg-[var(--press)]" onClick={() => zoomAt(size.w / 2, size.h / 2, view.k * 1.25)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+        <button type="button" aria-label="Reset zoom" title="Reset zoom and position" className="flex h-11 w-11 items-center justify-center rounded-full text-[11px] font-medium tabular-nums [touch-action:manipulation] active:bg-[var(--press)]" onClick={() => setView({ x: 0, y: 0, k: 1 })}>
+          {Math.round(view.k * 100)}%
+        </button>
+        <button type="button" aria-label="Zoom out" className="flex h-11 w-11 items-center justify-center rounded-full [touch-action:manipulation] active:bg-[var(--press)]" onClick={() => zoomAt(size.w / 2, size.h / 2, view.k / 1.25)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M5 12h14" /></svg>
+        </button>
+      </div>
       {panel === "settings" && (
         <SettingsPanel
           settings={settings}

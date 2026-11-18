@@ -86,6 +86,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Left sidebar with boards (Board 1, Board 2, ...), add-board button, Demos link, show/hide toggle.
 - Floating toolbar: pen, eraser, undo, clear board (undoable) | Text (T), Ask, Photo | Analyze.
 - Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause".
+- Unbounded board with zoom and pan: +, −, and a reset button (shows the zoom %) under the settings gear; two-finger drag pans and pinch zooms; scroll pans, Ctrl/Cmd+scroll or a trackpad pinch zooms; Space + mouse drag pans. Zoom runs 2%–400%. Each board remembers its own view in memory (not saved across refresh).
 - Handwriting setup: each box shows a faint gray guide letter to trace (readable in light and dark), and an Undo button in the header undoes the last stroke across all characters.
 - Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
 - Ask box and Photo → AI notes and diagrams (cycle / flow / tree layouts, optional numbered practice blanks).
@@ -95,7 +96,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Boards, settings, and handwriting glyphs persisted in localStorage.
 
 ### Out of scope (do not build, do not stub)
-- Accounts/login, database, sharing, collaboration, export, color picker, shapes, images other than the photo-to-diagram flow, zoom/pan canvas (unless needed for correctness), hardware anything.
+- Accounts/login, database, sharing, collaboration, export, color picker, shapes, images other than the photo-to-diagram flow, hardware anything.
 - Any deploy or Vercel configuration changes unless Noah asks (Noah handles deploys and merges).
 
 ---
@@ -140,7 +141,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 ### Layout
 - Canvas fills the viewport (`position: fixed; inset: 0`; safe-area insets on all floating chrome). Board color and ink color follow the theme.
 - Top left: sidebar toggle (always reachable) and the translucent boards sidebar (boards, Add board, Demos). The sidebar floats over the canvas, so toggling never resizes the canvas.
-- Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, demos).
+- Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, demos). Zoom controls sit in a small vertical pill just under it.
 - Bottom center toolbar: pen, eraser (whole-stroke), undo, clear board (one Undo restores it) | Text (T), Ask, Photo | Analyze. Nothing else.
 - Small notices appear top center (e.g. "Nothing to answer found", "Couldn't analyze: …", "2 of 3 right").
 - All tap targets at least 44px. No hover-only UI, no right-click, nothing that only works with a mouse (keyboard shortcuts are extras: Enter = Analyze, Delete = delete selection, Escape = deselect).
@@ -159,7 +160,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - AI content is system blue (#007AFF light / #0A84FF dark); the student's ink and typed text use the ink color. Low-confidence answers are muted.
 
 ### Input behavior
-- Pointer Events. Palm rejection: while a pen is down or was active (including hover) in the last 500 ms, touch is ignored. Two fingers cancel a finger stroke. Finger draws when no pen is in use.
+- Pointer Events. Board coordinates are independent of the view: `screen = board × zoom + offset`, applied to both ink canvases and (as a CSS transform) the overlay. Palm rejection: while a pen is down or was active (including hover) in the last 500 ms, touch is ignored. Two fingers cancel a finger stroke and pan/zoom instead. Finger draws when no pen is in use.
 - The page never scrolls, zooms, selects text, shows callouts, or rubber-bands while drawing on the canvas.
 - Drawing is never blocked by network activity. The Ask box and text editor open on pointer LIFT with `flushSync` + `autoFocus` so iPad shows the keyboard (untested on device).
 
@@ -229,6 +230,7 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 
 - Manual by default: Analyze button or Enter. With auto-analyze on, the idle timer resets on every stroke point and fires only when content changed since the last analysis (`inkVersion !== lastAnalyzedVersion`).
 - Empty board (no strokes, typed text, or practice diagram): never call the API ("Draw something first").
+- The exported image covers all board content (ink, text, practice diagrams, answers), not just what is on screen. A very spread-out board is downscaled to fit `EXPORT_MAX_SIDE`, so tiny writing far apart may be harder for Gemini to read.
 - Only one analysis request in flight. Starting a new stroke or switching boards aborts it; late results for a changed or inactive board are ignored.
 - After a result: ADD the new answers to the board's existing ones (nothing is replaced; a follow-up becomes its own answer). An item that repeats an existing answer's problem in the same spot is dropped, so the old one and its dragged position stay. `create` items (a written command to make a diagram/note) call `/api/create` once each (tracked by `Card.source`) and place the card under the command.
 - API failure: never blocks drawing; one retry for 5xx/network, then a short notice ("Couldn't analyze: Gemini quota exceeded, check API key billing", etc.).
@@ -267,7 +269,7 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 ## 13. Overlay rendering
 
 - One DOM overlay above the ink canvases holds answers, AI cards, typed text, editors and the Ask box. It is never part of the image sent to Gemini (practice diagrams are re-rendered in gray for the export).
-- Answer placement: to the right of the answered box, then below, left, above; on-screen; avoiding other answers and cards. Text size follows the height of what was written, capped (text ≤44 px, drawn ≤110 px) and shrunk to fit the screen width.
+- Answer placement: to the right of the answered box, then below, left, above; avoiding other answers and cards (the board is unbounded, so there is no screen edge). Text size follows the height of what was written, capped (text ≤44 px, drawn ≤110 px) and shrunk to fit the screen width at 100% zoom, so zooming never re-flows answers.
 - Renderers sit behind `AnswerRenderer { measure(answer, maxW); renderAnswer(answer, maxW) }`: ink (glyphs), text pill, explain card. `makeDefaultRenderer(glyphSet, color, handwriting)` picks one per answer.
 - Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × ÷ / ( ) . x y`, a space, and superscripts. `lib/rich.ts` parses `^(…)` exponents; both renderers draw them smaller and raised.
 - With "Write answers in my handwriting" on and at least one glyph set up, EVERY answer (explanations included) is drawn with the user's glyphs. Long answers wrap onto several lines.

@@ -39,7 +39,7 @@ export async function exportBoardPng(
   viewH: number,
 ) {
   const pad = 24
-  let x0 = 0, y0 = 0, x1 = viewW, y1 = viewH
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   for (const s of strokes) {
     for (const p of s.points) {
       x0 = Math.min(x0, p.x - pad)
@@ -68,6 +68,12 @@ export async function exportBoardPng(
     y0 = Math.min(y0, a.top - pad)
     x1 = Math.max(x1, a.left + a.w + pad)
     y1 = Math.max(y1, a.top + a.h + pad)
+  }
+  if (!Number.isFinite(x0)) {
+    x0 = 0
+    y0 = 0
+    x1 = viewW
+    y1 = viewH
   }
   const region: ExportRegion = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
   const scale = Math.min(1, EXPORT_MAX_SIDE / Math.max(region.w, region.h))

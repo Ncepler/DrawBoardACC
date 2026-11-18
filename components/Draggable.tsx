@@ -12,7 +12,7 @@ export default function Draggable({
   y,
   w,
   h,
-  bounds,
+  scale = 1,
   selected,
   onSelect,
   onMove,
@@ -24,7 +24,8 @@ export default function Draggable({
   y: number
   w: number
   h: number
-  bounds: { w: number; h: number }
+  /** Board zoom (screen px per board px): pointer movement is divided by it, and tap targets stay 44 screen px. */
+  scale?: number
   selected: boolean
   onSelect: () => void
   onMove: (x: number, y: number) => void
@@ -37,7 +38,7 @@ export default function Draggable({
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
   const left = drag?.x ?? x
   const top = drag?.y ?? y
-  const hit = Math.max(8, (44 - Math.min(w, h)) / 2)
+  const hit = Math.max(8, (44 - Math.min(w, h) * scale) / 2) / scale
 
   const finish = (e: React.PointerEvent) => {
     e.stopPropagation()
@@ -76,10 +77,7 @@ export default function Draggable({
         const dy = e.clientY - g.sy
         if (!g.moved && Math.hypot(dx, dy) < 5) return // a tap isn't a move
         g.moved = true
-        setDrag({
-          x: Math.min(Math.max(0, g.ox + dx), Math.max(0, bounds.w - w)),
-          y: Math.min(Math.max(0, g.oy + dy), Math.max(0, bounds.h - h)),
-        })
+        setDrag({ x: g.ox + dx / scale, y: g.oy + dy / scale })
       }}
       onPointerUp={finish}
       onPointerCancel={finish}
@@ -87,13 +85,13 @@ export default function Draggable({
       {/* enlarged invisible hit area so small items are still easy to grab */}
       {!handle && <div className="absolute" data-pad="1" style={{ inset: -hit }} />}
       {selected && (
-        <div className="pointer-events-none absolute rounded-xl ring-2 ring-[#007AFF]/60" style={{ inset: -6 }} />
+        <div className="pointer-events-none absolute rounded-xl ring-2 ring-[#007AFF]/60" style={{ inset: -6 / scale }} />
       )}
       <div className={handle ? "pointer-events-none" : undefined}>{children}</div>
       {handle ? (
         <div
           className="pointer-events-auto absolute inset-x-0 top-0 flex justify-center rounded-t-xl"
-          style={{ height: Math.max(28, handle) }}
+          style={{ height: Math.max(28 / scale, handle) }}
           aria-label="Drag to move"
         >
           <span className="mt-1.5 h-1.5 w-10 rounded-full bg-[#007AFF]/30" />
@@ -104,7 +102,7 @@ export default function Draggable({
           type="button"
           aria-label="Delete"
           className="pointer-events-auto absolute flex h-11 w-11 items-center justify-center [touch-action:manipulation]"
-          style={{ right: -26, top: -26 }}
+          style={{ right: -26, top: -26, transform: `scale(${1 / scale})` }}
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
           onClick={(e) => {
