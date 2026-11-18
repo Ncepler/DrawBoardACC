@@ -8,7 +8,7 @@ Owner: Noah Cepler (student, builds web projects on Next.js / Tailwind / Supabas
 
 ## 0. One-paragraph summary
 
-A whiteboard app you draw (or type) on with an Apple Pencil, finger, or mouse. When you tap **Analyze**, the app takes a picture of the board, sends it to the Gemini API, and Gemini decides what you want answered: a math problem to solve, a question or "Explain X" to explain, a blank or "?" in a diagram to name, or your own wrong answer to correct. No question mark is required. Answers appear next to what they answer: numbers and simple math are drawn as pen strokes (in your own handwriting if you set it up), terms show as short text, explanations as a small card. You can also ask for content (an **Ask** box: "diagram of photosynthesis with 4 blanks") or turn a **photo** into a diagram; practice diagrams with numbered blanks can be filled in by pen or by typing and checked. The first target user is a student who diagrams a whole unit on a board and gets stuck on terms.
+A whiteboard app you draw (or type) on with an Apple Pencil, finger, or mouse. When you tap **Analyze**, the app takes a picture of the board, sends it to the Gemini API, and Gemini decides what you want answered: a math problem to solve, a question or "Explain X" to explain, a blank or "?" in a diagram to name, or your own wrong answer to correct. No question mark is required. Answers appear next to what they answer: numbers and simple math are drawn as pen strokes (in your own handwriting if you set it up), terms show as short text, explanations as a small card. You can also ask for content (the **Create** button: "diagram of photosynthesis with 4 blanks") or turn a **photo** into a diagram; practice diagrams with numbered blanks can be filled in by pen or by typing and checked. The first target user is a student who diagrams a whole unit on a board and gets stuck on terms.
 
 This repo is still a MOCKUP to answer one question: is the board-that-answers-you loop genuinely useful? It is not the final product and it is not a Miro competitor.
 
@@ -25,12 +25,12 @@ The idea: draw a "?" right where the gap is, keep going, and the answer shows up
 ## 2. The core loop
 
 1. The student draws (pen strokes) and/or types (Text tool) on the board.
-2. The student taps **Analyze** (or presses Enter on a keyboard). Automatic analysis after a pause is optional (Settings → "Analyze automatically when I pause", idle delay is one named constant, 2500 ms); it is OFF by default to save API quota.
+2. The student taps **Analyze** (or presses Enter on a keyboard). Automatic analysis after a pause is optional (Settings → "Analyze automatically when I pause", it waits for 1200 ms of stillness: pointer movement restarts the wait, and switching tools, pressing any button, undo/redo or erasing cancels it; constants `IDLE_MS`, `IDLE_MOVE_PX`); it is OFF by default to save API quota.
 3. The app exports everything on the board as a PNG: ink strokes and typed text (black), practice diagrams (gray), and the app's earlier answers (blue, so follow-ups like "÷ 2" under an answer build on it). AI notes and non-practice cards are left out.
 4. `/api/answer` sends the image to Gemini, which returns only NEW items: what it read, what kind of response (math / term / explain / check, or create), the answer, a confidence, and the box of what it answers. It handles commands as well as questions ("define…", "write out a diagram for…").
 5. Each answer is shown next to what it answers, on the overlay layer.
 
-Second loop (creation): Ask box or Photo → `/api/create` → Gemini returns a note or a diagram (nodes + edges + optional numbered blanks) → the app lays it out and places it on the board as a draggable card.
+Second loop (creation): Create box or Photo → `/api/create` → Gemini returns a note or a diagram (nodes + edges + optional numbered blanks) → the app lays it out and places it on the board as a draggable card.
 
 Everything else in the app exists to support these loops or the drawing feel.
 
@@ -47,7 +47,7 @@ Noah's own priority order is software first. Hardware is far-future and depends 
 
 Phases and where they stand:
 1. Mockup loop: answers on the board, boards, Apple-feel ink. **Built.**
-2. Answers in the user's own handwriting. **Started:** per-character handwriting capture in Settings (about 100 characters: letters, numbers, and a "More symbols" tab with π √ ^ ÷ ≤ ≥ and more); with the setting on, every answer is drawn with those glyphs, and any missing character is typeset. Not yet: connected cursive, natural spacing/jitter, multiple samples per character, learning from normal writing.
+2. Answers in the user's own handwriting. **Started:** per-character handwriting capture in Settings (about 95 characters; closing marks ) ] } > ≥ are the opening marks flipped: letters, numbers, and a "More symbols" tab with π √ ^ ÷ ≤ ≥ and more); with the setting on, every answer is drawn with those glyphs, and any missing character is typeset. Not yet: connected cursive, natural spacing/jitter, multiple samples per character, learning from normal writing.
 3. Practice mode: diagrams with blanks, the user fills them in, the app checks them. **Built (first version):** Ask for "… with N blanks"; fill by pen (checked by Gemini via Analyze) or by typing (checked locally by "Check answers").
 4. Photo of a real whiteboard / textbook figure. **Built (first version):** Photo button → diagram or note.
 5. Possibly: iPad-optimized app, then hardware.
@@ -84,20 +84,20 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 ### In scope (built)
 - Full-screen whiteboard canvas with Apple-feel ink using Apple Pencil, finger, or mouse.
 - Left sidebar with boards (Board 1, Board 2, ...), add-board button, Demos link, show/hide toggle.
-- Floating toolbar: pen, eraser, Move (hand), undo, clear board (undoable) | Text (T), Ask, Photo | Analyze.
+- Floating toolbar: pen, eraser, Move (hand), undo, redo, clear board (undoable; also "Clear whole board" in the sidebar) | Text (T), Create (palette), Photo | Analyze.
 - Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause".
 - Unbounded board with zoom and pan: +, −, and a reset button (shows the zoom %) under the settings gear; two-finger drag pans and pinch zooms; scroll pans, Ctrl/Cmd+scroll or a trackpad pinch zooms; Space + mouse drag pans. Zoom runs 2%–400%. Each board remembers its own view in memory (not saved across refresh). Zoomed out, typed text, answers and line thickness keep their 100% size (only their positions follow the zoom); diagrams, notes and graphs shrink with the board so ink drawn on them stays aligned.
 - Handwriting setup: each box shows a faint gray guide letter to trace (readable in light and dark), and an Undo button in the header undoes the last stroke across all characters.
 - Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
-- Paste an image (Cmd/Ctrl+V) or drop one on the board: opens the same box as Photo (default request "Turn this into a diagram"; edit it to e.g. "solve this").
-- Ask box and Photo → AI notes, diagrams (cycle / flow / tree layouts, optional numbered practice blanks) and function graphs (blank axes drawn by the app, curves plotted from formulas). "graph it" written on the board makes a graph too.
+- Paste an image (Cmd/Ctrl+V), drop one, or pick one with Photo: a popup asks "What do you want to do with this photo?" with two buttons, **Draw on it** (puts the photo on the board under the ink; grab strip along its top moves it, corner handle resizes, × deletes; saved in localStorage and included in the image sent to Gemini) or **Make a diagram** (opens the Create box with "Turn this into a diagram"; edit it to e.g. "solve this").
+- Create box and Photo → AI notes, diagrams (cycle / flow / tree layouts, optional numbered practice blanks) and function graphs (blank axes drawn by the app, curves plotted from formulas). "graph it" written on the board makes a graph too.
 - Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".
-- Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable.
+- Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable. Notes, diagrams and graphs also have a corner handle to resize (one undo step).
 - `/demo` page with ready-made demo boards.
 - Boards, settings, and handwriting glyphs persisted in localStorage.
 
 ### Out of scope (do not build, do not stub)
-- Accounts/login, database, sharing, collaboration, export, color picker, shapes, images other than the photo-to-diagram flow, hardware anything.
+- Accounts/login, database, sharing, collaboration, export, color picker, shapes, images other than the photo-to-diagram flow and photos placed on the board to draw over, hardware anything.
 - Any deploy or Vercel configuration changes unless Noah asks (Noah handles deploys and merges).
 
 ---
@@ -143,17 +143,17 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Canvas fills the viewport (`position: fixed; inset: 0`; safe-area insets on all floating chrome). Board color and ink color follow the theme.
 - Top left: sidebar toggle (always reachable) and the translucent boards sidebar (boards, Add board, Demos). The sidebar floats over the canvas, so toggling never resizes the canvas.
 - Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, demos). Zoom controls sit in a small vertical pill just under it.
-- Bottom center toolbar: pen, eraser (whole-stroke), Move (hand: drag the board with any pointer), undo, clear board (one Undo restores it) | Text (T), Ask, Photo | Analyze. Nothing else.
+- Bottom center toolbar: pen, eraser (whole-stroke), Move (hand: drag the board with any pointer), undo, redo, clear board (one Undo restores it) | Text (T), Create (palette), Photo | Analyze. Nothing else.
 - Small notices appear top center (e.g. "Nothing to answer found", "Couldn't analyze: …", "2 of 3 right").
 - All tap targets at least 44px. No hover-only UI, no right-click, nothing that only works with a mouse (keyboard shortcuts are extras: Enter = Analyze, Delete = delete selection, Escape = deselect).
 
 ### Tools and items
-- **Ask**: tap the tool, tap the board where the result should go, type, Create. A "Thinking…" placeholder shows while Gemini works; the result is placed at the nearest free spot.
+- **Create** (palette button): opens the Create box in the middle of the screen (same box as the demo's "make it for me"), type, Create. Undo right after a creation removes the card and reopens the box with the same prompt (and photo) to edit; Redo brings the card back. A "Thinking…" placeholder shows while Gemini works; the result is placed at the nearest free spot.
 - **Photo**: pick or take a photo (downscaled to ≤1600 px JPEG in the browser), optionally change the request (default "Turn this into a diagram"), Create.
 - **Text (T)**: click empty board to type (Enter saves, Shift+Enter new line, the box grows with its text); click a practice blank to type its answer; click typed text to edit. Clicking away saves, and that click only closes the box (it never opens another). The tool stays on until another tool is picked.
 - A pen or mouse can draw right up to an answer's edge; only a finger gets the enlarged grab area.
 - **Items** (answers, notes, diagrams, typed text): tap selects (ring + × button), drag moves, × deletes; undo restores. Diagrams move only by the grab strip along the top, so the pen can write on the rest. A dragged answer keeps its spot across re-analysis.
-- Erasing ink near an answer (within ~1.5× its box, min 100 px) removes that answer immediately. Undo only ever undoes the last action: undoing a stroke leaves answers alone.
+- Erasing ink leaves answers alone; the eraser removes an answer only when it passes over the answer itself (undoable). Undo/redo only ever step the last action: undoing a stroke leaves answers alone.
 
 ### Visual language (Apple-like)
 - Font stack: `-apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif`.

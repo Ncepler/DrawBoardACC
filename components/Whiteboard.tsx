@@ -4,17 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import AnswerOverlay, { answerMode, makeDefaultRenderer, placeAnswers, type AnswerRenderer, type Selection } from "./AnswerOverlay"
 import Composer from "./Composer"
+import PhotoChoice from "./PhotoChoice"
 import InlineEditor from "./InlineEditor"
 import HandwritingSetup from "./HandwritingSetup"
 import SettingsPanel from "./SettingsPanel"
 import Sidebar from "./Sidebar"
 import Toolbar, { type Tool } from "./Toolbar"
-import { boxToBoard, exportBoardPng, mergeAnswers, pruneAnswers } from "@/lib/analysis"
+import { boxToBoard, exportBoardPng, mergeAnswers } from "@/lib/analysis"
 import { cardSize, fitScale, naturalSize } from "@/lib/cards"
 import { isCorrect } from "@/lib/check"
 import { BLANK_H, BLANK_W, layoutDiagram } from "@/lib/diagram"
 import { TEXT_PAD, TEXT_SIZE, textBoxSize } from "@/lib/texts"
-import { ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
+import { ERASER_RADIUS, IDLE_MOVE_PX, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
 import { DEMOS, inkFromText } from "@/lib/demos"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
 import { failureText, photoToJpeg } from "@/lib/photo"
@@ -31,19 +32,23 @@ import {
   type UserGlyphs,
 } from "@/lib/settings"
 import { initialState, loadState, newBoard, saveState } from "@/lib/storage"
-import type { Answer, AnswerItem, AppState, Board, Card, CardPayload, Point, Stroke, TextBox } from "@/lib/types"
+import type { Answer, AnswerItem, AppState, Board, BoardImage, Card, CardPayload, Point, Stroke, TextBox } from "@/lib/types"
 
 type UndoAction =
   | { type: "add"; stroke: Stroke }
-  | { type: "erase"; items: { stroke: Stroke; index: number }[] }
-  | { type: "card-add"; card: Card }
+  | { type: "erase"; items: { stroke: Stroke; index: number }[]; answers?: { answer: Answer; index: number }[] }
+  | { type: "card-add"; card: Card; reopen?: { x: number; y: number; prompt: string; photo: ComposerState["photo"] } }
+  | { type: "image-add"; image: BoardImage }
+  | { type: "image-del"; image: BoardImage; index: number }
+  | { type: "image-scale"; id: string; prev: number; next: number }
   | { type: "card-del"; card: Card; index: number }
   | { type: "answer-del"; answer: Answer; index: number }
   | { type: "text-add"; text: TextBox }
   | { type: "text-del"; text: TextBox; index: number }
-  | { type: "text-edit"; id: string; prev: string }
-  | { type: "fill"; cardId: string; nodeId: string; prev?: string }
-  | { type: "clear"; strokes: Stroke[]; answers: Answer[]; cards: Card[]; texts: TextBox[] }
+  | { type: "text-edit"; id: string; prev: string; next: string }
+  | { type: "fill"; cardId: string; nodeId: string; prev?: string; next?: string }
+  | { type: "card-scale"; id: string; prev: number; next: number }
+  | { type: "clear"; strokes: Stroke[]; answers: Answer[]; cards: Card[]; texts: TextBox[]; images: BoardImage[] }
 
 /** Open Text-tool editor: a new box, an existing box, or a practice blank. */
 type EditorState =
@@ -59,6 +64,7 @@ type Drawing = {
   stroke: Stroke | null
   predicted: Point[]
   erased: { stroke: Stroke; index: number }[]
+  erasedAnswers: { answer: Answer; index: number }[]
   lastX: number
   lastY: number
   touch: boolean
@@ -98,7 +104,7 @@ function freeSpot(at: { x: number; y: number }, w: number, h: number, vis: Rect,
 }
 
 /** Ink-like changes bump inkVersion so auto-analyze notices them. */
-const isBlank = (b: Board) => !b.strokes.length && !b.answers.length && !b.cards?.length && !b.texts?.length
+const isBlank = (b: Board) => !b.strokes.length && !b.answers.length && !b.cards?.length && !b.texts?.length && !b.images?.length
 
 const bump = (b: Board): Board => ({ ...b, inkVersion: b.inkVersion + 1, updatedAt: Date.now() })
 
@@ -115,6 +121,43 @@ function setFill(cards: Card[], cardId: string, nodeId: string, fill: string | u
         }
       : c,
   )
+}
+
+/** Applies an undone action again. */
+function redoBoard(b: Board, a: UndoAction): Board {
+  switch (a.type) {
+    case "add":
+      return bump({ ...b, strokes: [...b.strokes, a.stroke] })
+    case "erase": {
+      const ids = new Set(a.items.map((i) => i.stroke.id))
+      const aids = new Set((a.answers ?? []).map((x) => x.answer.id))
+      return bump({ ...b, strokes: b.strokes.filter((s) => !ids.has(s.id)), answers: b.answers.filter((x) => !aids.has(x.id)) })
+    }
+    case "card-add":
+      return { ...b, cards: [...(b.cards ?? []), a.card] }
+    case "image-add":
+      return { ...b, images: [...(b.images ?? []), a.image] }
+    case "image-del":
+      return { ...b, images: (b.images ?? []).filter((i) => i.id !== a.image.id) }
+    case "image-scale":
+      return { ...b, images: (b.images ?? []).map((i) => (i.id === a.id ? { ...i, scale: a.next } : i)) }
+    case "card-del":
+      return { ...b, cards: (b.cards ?? []).filter((c) => c.id !== a.card.id) }
+    case "answer-del":
+      return { ...b, answers: b.answers.filter((x) => x.id !== a.answer.id) }
+    case "text-add":
+      return bump({ ...b, texts: [...(b.texts ?? []), a.text] })
+    case "text-del":
+      return bump({ ...b, texts: (b.texts ?? []).filter((t) => t.id !== a.text.id) })
+    case "text-edit":
+      return bump({ ...b, texts: (b.texts ?? []).map((t) => (t.id === a.id ? { ...t, text: a.next } : t)) })
+    case "fill":
+      return { ...b, cards: setFill(b.cards ?? [], a.cardId, a.nodeId, a.next) }
+    case "card-scale":
+      return { ...b, cards: (b.cards ?? []).map((c) => (c.id === a.id ? { ...c, scale: a.next } : c)) }
+    case "clear":
+      return bump({ ...b, strokes: [], answers: [], cards: [], texts: [], images: [] })
+  }
 }
 
 function editorProps(ed: EditorState, board: Board) {
@@ -135,10 +178,13 @@ export default function Whiteboard() {
   const [tool, setTool] = useState<Tool>("pen")
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [selected, setSelected] = useState<Selection>(null)
   const [composer, setComposer] = useState<ComposerState | null>(null)
+  const [photoChoice, setPhotoChoice] = useState<{ file: File; photo: NonNullable<ComposerState["photo"]> } | null>(null)
+  const [imgDrag, setImgDrag] = useState<{ id: string; x: number; y: number } | null>(null)
   const [pending, setPending] = useState<{ id: string; boardId: string; x: number; y: number }[]>([])
   const photoInput = useRef<HTMLInputElement>(null)
   const askTap = useRef<{ pointerId: number; x: number; y: number; tool: "ask" | "text" } | null>(null)
@@ -170,7 +216,9 @@ export default function Whiteboard() {
   const touches = useRef(new Set<number>())
   const penDown = useRef(false)
   const penUntil = useRef(0)
+  const warnedSave = useRef(false)
   const undoStacks = useRef(new Map<string, UndoAction[]>())
+  const redoStacks = useRef(new Map<string, UndoAction[]>())
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -196,6 +244,7 @@ export default function Whiteboard() {
   const syncUndo = useCallback(() => {
     const s = stateRef.current
     setCanUndo(!!s && (undoStacks.current.get(s.activeBoardId)?.length ?? 0) > 0)
+    setCanRedo(!!s && (redoStacks.current.get(s.activeBoardId)?.length ?? 0) > 0)
   }, [])
 
   // ---------- canvas rendering ----------
@@ -308,7 +357,6 @@ export default function Whiteboard() {
     const practice = (board.cards ?? []).some((c) => c.type === "diagram")
     if (board.strokes.length === 0 && !practice && !(board.texts ?? []).length) {
       if (manual) flash("Draw something first")
-      if (board.answers.length) patchBoard(board.id, (b) => ({ ...b, answers: [] }))
       return
     }
     // Enter forces a pass even if the ink hasn't changed since the last one.
@@ -325,7 +373,7 @@ export default function Whiteboard() {
             return a ? [{ text: a.text, kind: a.kind, left: r.left, top: r.top, w: r.w, h: r.h }] : []
           })
         : []
-      exported = await exportBoardPng(board.strokes, board.cards ?? [], board.texts ?? [], rects, w, h)
+      exported = await exportBoardPng(board.strokes, board.cards ?? [], board.texts ?? [], rects, w, h, board.images ?? [])
     } catch {
       return
     }
@@ -405,6 +453,28 @@ export default function Whiteboard() {
     void runAnalysis(true)
   }, [runAnalysis])
 
+  // Auto-analyze waits for stillness: any pointer movement (a hovering pen or a mouse that is
+  // heading for a button) restarts the wait, and pressing anything else on the page cancels it.
+  useEffect(() => {
+    let last: { x: number; y: number } | null = null
+    const onMove = (e: PointerEvent) => {
+      if (!idleTimer.current) return
+      if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) < IDLE_MOVE_PX) return
+      last = { x: e.clientX, y: e.clientY }
+      scheduleIdle()
+    }
+    const onDown = () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current)
+      idleTimer.current = null
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerdown", onDown, true)
+    return () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerdown", onDown, true)
+    }
+  }, [scheduleIdle])
+
   // Keyboard: Enter analyzes, Delete removes the selected item, Escape deselects.
   // Ignored while typing in the Ask box.
   const deleteRef = useRef<(s: NonNullable<Selection>) => void>(() => {})
@@ -469,14 +539,19 @@ export default function Whiteboard() {
 
   useEffect(() => {
     if (!state) return
-    const t = setTimeout(() => saveState(state), 400)
-    const flush = () => saveState(stateRef.current ?? state)
+    const save = (s: AppState) => {
+      if (saveState(s) || warnedSave.current) return
+      warnedSave.current = true
+      flash("Couldn't save: the board is too big (photos are large). Delete a photo.", 6000)
+    }
+    const t = setTimeout(() => save(state), 400)
+    const flush = () => save(stateRef.current ?? state)
     window.addEventListener("pagehide", flush)
     return () => {
       clearTimeout(t)
       window.removeEventListener("pagehide", flush)
     }
-  }, [state])
+  }, [state, flash])
 
   // ---------- sizing ----------
   const hydrated = state !== null
@@ -622,20 +697,43 @@ export default function Whiteboard() {
   const eraseAt = (d: Drawing, ax: number, ay: number, bx: number, by: number) => {
     const board = activeBoard()
     if (!board) return
+    const r = ERASER_RADIUS / viewRef.current.k
     const hit: { stroke: Stroke; index: number }[] = []
     board.strokes.forEach((s, index) => {
-      if (segmentHitsStroke(s, ax, ay, bx, by, ERASER_RADIUS / viewRef.current.k)) hit.push({ stroke: s, index })
+      if (segmentHitsStroke(s, ax, ay, bx, by, r)) hit.push({ stroke: s, index })
     })
-    if (!hit.length) return
+    // Answers are erased like ink: when the eraser passes over one. Erasing the question leaves its answer.
+    const hitAnswers: { answer: Answer; index: number }[] = []
+    if (board.answers.length && rendererRef.current) {
+      const k = viewRef.current.k
+      const f = k < 1 ? 1 / k : 1 // answers keep their 100% size when zoomed out
+      const pos = placeAnswers(board.answers, board.cards ?? [], sizeRef.current.w - 16, rendererRef.current)
+      const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / Math.max(2, r / 2)))
+      board.answers.forEach((a, index) => {
+        const p = pos.get(a.id)
+        if (!p) return
+        for (let i = 0; i <= steps; i++) {
+          const x = ax + ((bx - ax) * i) / steps
+          const y = ay + ((by - ay) * i) / steps
+          if (x >= p.left - r && x <= p.left + p.w * f + r && y >= p.top - r && y <= p.top + p.h * f + r) {
+            hitAnswers.push({ answer: a, index })
+            return
+          }
+        }
+      })
+    }
+    if (!hit.length && !hitAnswers.length) return
     const ids = new Set(hit.map((h) => h.stroke.id))
+    const aids = new Set(hitAnswers.map((h) => h.answer.id))
     d.erased.push(...hit)
-    const gone = hit.map((h) => h.stroke)
+    d.erasedAnswers.push(...hitAnswers)
     patchBoard(board.id, (b) => ({
       ...b,
       strokes: b.strokes.filter((s) => !ids.has(s.id)),
-      answers: pruneAnswers(b.answers, gone),
+      answers: b.answers.filter((a) => !aids.has(a.id)),
     }))
-    redrawInk()
+    if (hit.length) redrawInk()
+    setSelected(null)
   }
 
   /** Practice blank under a point, with its on-screen rect, if any. */
@@ -730,6 +828,7 @@ export default function Whiteboard() {
       stroke: null,
       predicted: [],
       erased: [],
+      erasedAnswers: [],
       lastX: pt.x,
       lastY: pt.y,
       touch: isTouch,
@@ -795,7 +894,15 @@ export default function Whiteboard() {
       d.predicted = predicted.map((ev) => pointOf(ev, rect, real)) // drawn, never stored
       scheduleLive()
     }
-    scheduleIdle()
+  }
+
+  /** Records a new action; anything that was undone can no longer be redone. */
+  const pushUndo = (boardId: string, a: UndoAction) => {
+    const stack = undoStacks.current.get(boardId) ?? []
+    stack.push(a)
+    undoStacks.current.set(boardId, stack)
+    redoStacks.current.set(boardId, [])
+    syncUndo()
   }
 
   const onPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -832,9 +939,6 @@ export default function Whiteboard() {
     drawing.current = null
     const board = activeBoard()
     if (!board) return
-    const stack = undoStacks.current.get(board.id) ?? []
-    undoStacks.current.set(board.id, stack)
-
     if (d.tool === "pen" && d.stroke) {
       const stroke = d.stroke
       const ctx = inkRef.current?.getContext("2d")
@@ -845,35 +949,35 @@ export default function Whiteboard() {
         drawStroke(ctx, { ...stroke, color: inkColor.current, width: stroke.width * (v.k < 1 ? 1 / v.k : 1) })
       }
       clearLive()
-      stack.push({ type: "add", stroke })
+      pushUndo(board.id, { type: "add", stroke })
       patchBoard(board.id, (b) => ({
         ...b,
         strokes: [...b.strokes, stroke],
         inkVersion: b.inkVersion + 1,
         updatedAt: Date.now(),
       }))
-    } else if (d.tool === "eraser" && d.erased.length) {
-      stack.push({ type: "erase", items: d.erased })
+      scheduleIdle()
+    } else if (d.tool === "eraser" && (d.erased.length || d.erasedAnswers.length)) {
+      pushUndo(board.id, { type: "erase", items: d.erased, answers: d.erasedAnswers })
       patchBoard(board.id, (b) => ({ ...b, inkVersion: b.inkVersion + 1, updatedAt: Date.now() }))
     }
-    syncUndo()
-    scheduleIdle()
   }
 
   // ---------- actions ----------
   const undo = () => {
     const board = activeBoard()
     if (!board || drawing.current) return
+    cancelAnalysis() // undoing is editing: no auto-analysis (and stop one that's running)
     const action = undoStacks.current.get(board.id)?.pop()
     if (!action) return
+    const redo = redoStacks.current.get(board.id) ?? []
+    redo.push(action)
+    redoStacks.current.set(board.id, redo)
+    setSelected(null)
     if (action.type === "clear") {
-      patchBoard(board.id, (b) => bump({ ...b, strokes: action.strokes, answers: action.answers, cards: action.cards, texts: action.texts }))
-      setSelected(null)
+      patchBoard(board.id, (b) => bump({ ...b, strokes: action.strokes, answers: action.answers, cards: action.cards, texts: action.texts, images: action.images }))
       redrawInk()
-      syncUndo()
-      return
-    }
-    if (action.type === "text-add" || action.type === "text-del" || action.type === "text-edit" || action.type === "fill") {
+    } else if (action.type === "text-add" || action.type === "text-del" || action.type === "text-edit" || action.type === "fill") {
       patchBoard(board.id, (b) => {
         const texts = [...(b.texts ?? [])]
         if (action.type === "text-add") return bump({ ...b, texts: texts.filter((t) => t.id !== action.text.id) })
@@ -885,11 +989,18 @@ export default function Whiteboard() {
           return bump({ ...b, texts: texts.map((t) => (t.id === action.id ? { ...t, text: action.prev } : t)) })
         return { ...b, cards: setFill(b.cards ?? [], action.cardId, action.nodeId, action.prev) }
       })
-      setSelected(null)
-      syncUndo()
-      return
-    }
-    if (action.type === "card-add" || action.type === "card-del" || action.type === "answer-del") {
+    } else if (action.type === "image-add" || action.type === "image-del" || action.type === "image-scale") {
+      patchBoard(board.id, (b) => {
+        if (action.type === "image-add") return { ...b, images: (b.images ?? []).filter((i) => i.id !== action.image.id) }
+        if (action.type === "image-scale")
+          return { ...b, images: (b.images ?? []).map((i) => (i.id === action.id ? { ...i, scale: action.prev } : i)) }
+        const images = [...(b.images ?? [])]
+        images.splice(Math.min(action.index, images.length), 0, action.image)
+        return { ...b, images }
+      })
+    } else if (action.type === "card-scale") {
+      patchBoard(board.id, (b) => ({ ...b, cards: (b.cards ?? []).map((c) => (c.id === action.id ? { ...c, scale: action.prev } : c)) }))
+    } else if (action.type === "card-add" || action.type === "card-del" || action.type === "answer-del") {
       patchBoard(board.id, (b) => {
         if (action.type === "card-add") return { ...b, cards: (b.cards ?? []).filter((c) => c.id !== action.card.id) }
         if (action.type === "card-del") {
@@ -901,26 +1012,70 @@ export default function Whiteboard() {
         answers.splice(Math.min(action.index, answers.length), 0, action.answer)
         return { ...b, answers }
       })
-      setSelected(null)
-      syncUndo()
-      return
-    }
-    patchBoard(board.id, (b) => {
-      let strokes = b.strokes
-      const answers = b.answers
-      if (action.type === "add") {
-        strokes = strokes.filter((s) => s.id !== action.stroke.id)
-      } else {
-        strokes = [...strokes]
-        for (const it of [...action.items].sort((a, c) => a.index - c.index)) {
-          strokes.splice(Math.min(it.index, strokes.length), 0, it.stroke)
-        }
+      // Undoing a freshly created diagram/note goes back to its prompt, ready to edit.
+      if (action.type === "card-add" && action.reopen) {
+        const r = action.reopen
+        flushSync(() => setComposer({ x: r.x, y: r.y, prompt: r.prompt, photo: r.photo }))
       }
-      return { ...b, strokes, answers, inkVersion: b.inkVersion + 1, updatedAt: Date.now() }
-    })
+    } else {
+      patchBoard(board.id, (b) => {
+        let strokes = b.strokes
+        let answers = b.answers
+        if (action.type === "add") {
+          strokes = strokes.filter((s) => s.id !== action.stroke.id)
+        } else {
+          strokes = [...strokes]
+          for (const it of [...action.items].sort((a, c) => a.index - c.index)) {
+            strokes.splice(Math.min(it.index, strokes.length), 0, it.stroke)
+          }
+          answers = [...answers]
+          for (const it of [...(action.answers ?? [])].sort((a, c) => a.index - c.index)) {
+            answers.splice(Math.min(it.index, answers.length), 0, it.answer)
+          }
+        }
+        return { ...b, strokes, answers, inkVersion: b.inkVersion + 1, updatedAt: Date.now() }
+      })
+      redrawInk()
+    }
+    syncUndo()
+  }
+
+  const redo = () => {
+    const board = activeBoard()
+    if (!board || drawing.current) return
+    cancelAnalysis()
+    const action = redoStacks.current.get(board.id)?.pop()
+    if (!action) return
+    const stack = undoStacks.current.get(board.id) ?? []
+    stack.push(action)
+    undoStacks.current.set(board.id, stack)
+    setSelected(null)
+    if (action.type === "card-add") setComposer(null)
+    patchBoard(board.id, (b) => redoBoard(b, action))
     redrawInk()
     syncUndo()
-    scheduleIdle()
+  }
+
+  /** Live resize while dragging a card's corner; one undo step is recorded when the drag ends. */
+  const scaleCard = (id: string, scale: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, cards: (bd.cards ?? []).map((c) => (c.id === id ? { ...c, scale } : c)) }))
+  }
+  const finishScale = (id: string, prev: number, next: number) => {
+    const b = activeBoard()
+    if (b && Math.abs(prev - next) > 0.001) pushUndo(b.id, { type: "card-scale", id, prev, next })
+  }
+  const scaleImage = (id: string, scale: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, images: (bd.images ?? []).map((i) => (i.id === id ? { ...i, scale } : i)) }))
+  }
+  const finishImageScale = (id: string, prev: number, next: number) => {
+    const b = activeBoard()
+    if (b && Math.abs(prev - next) > 0.001) pushUndo(b.id, { type: "image-scale", id, prev, next })
+  }
+  const moveImage = (id: string, x: number, y: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, images: (bd.images ?? []).map((i) => (i.id === id ? { ...i, pos: { x, y } } : i)) }))
   }
 
   const selectBoard = (id: string) => {
@@ -940,19 +1095,12 @@ export default function Whiteboard() {
     commit({ ...s, boards: [...s.boards, b], activeBoardId: b.id })
   }
 
-  const pushUndo = (boardId: string, a: UndoAction) => {
-    const stack = undoStacks.current.get(boardId) ?? []
-    stack.push(a)
-    undoStacks.current.set(boardId, stack)
-    syncUndo()
-  }
-
   const clearBoard = () => {
     const b = activeBoard()
     if (!b || drawing.current || isBlank(b)) return
     cancelAnalysis()
-    pushUndo(b.id, { type: "clear", strokes: b.strokes, answers: b.answers, cards: b.cards ?? [], texts: b.texts ?? [] })
-    patchBoard(b.id, (bd) => bump({ ...bd, strokes: [], answers: [], cards: [], texts: [] }))
+    pushUndo(b.id, { type: "clear", strokes: b.strokes, answers: b.answers, cards: b.cards ?? [], texts: b.texts ?? [], images: b.images ?? [] })
+    patchBoard(b.id, (bd) => bump({ ...bd, strokes: [], answers: [], cards: [], texts: [], images: [] }))
     setSelected(null)
     setEditor(null)
     redrawInk()
@@ -966,6 +1114,12 @@ export default function Whiteboard() {
       if (index < 0) return
       pushUndo(b.id, { type: "answer-del", answer: b.answers[index], index })
       patchBoard(b.id, (bd) => ({ ...bd, answers: bd.answers.filter((a) => a.id !== sel.id) }))
+    } else if (sel.type === "image") {
+      const images = b.images ?? []
+      const index = images.findIndex((i) => i.id === sel.id)
+      if (index < 0) return
+      pushUndo(b.id, { type: "image-del", image: images[index], index })
+      patchBoard(b.id, (bd) => ({ ...bd, images: (bd.images ?? []).filter((i) => i.id !== sel.id) }))
     } else if (sel.type === "text") {
       const texts = b.texts ?? []
       const index = texts.findIndex((t) => t.id === sel.id)
@@ -991,7 +1145,13 @@ export default function Whiteboard() {
   }
 
   /** Ask box / photo: the AI makes a note or a diagram and it's placed where the user asked. */
-  const createCard = async (prompt: string, photo: string | null, at: { x: number; y: number }, source?: string) => {
+  const createCard = async (
+    prompt: string,
+    photo: string | null,
+    at: { x: number; y: number },
+    source?: string,
+    reopen?: { x: number; y: number; prompt: string; photo: ComposerState["photo"] },
+  ) => {
     const board = activeBoard()
     if (!board) return
     const pid = crypto.randomUUID()
@@ -1015,7 +1175,7 @@ export default function Whiteboard() {
       const { x, y } = freeSpot(at, nat.w * scale, nat.h * scale, vis, cur)
       const card = { ...payload, id: crypto.randomUUID(), pos: { x, y }, scale, prompt, source, createdAt: Date.now() } as Card
       patchBoard(board.id, (b) => ({ ...b, cards: [...(b.cards ?? []), card] }))
-      pushUndo(board.id, { type: "card-add", card })
+      pushUndo(board.id, { type: "card-add", card, reopen })
     } catch {
       flash("Couldn't create: network")
     } finally {
@@ -1032,19 +1192,63 @@ export default function Whiteboard() {
     const c = composer
     if (!c) return
     setComposer(null)
-    void createCard(prompt, c.photo?.base64 ?? null, { x: c.x, y: c.y })
+    void createCard(prompt, c.photo?.base64 ?? null, { x: c.x, y: c.y }, undefined, { x: c.x, y: c.y, prompt, photo: c.photo })
+  }
+
+  /** Toolbar Create button: the same box as the demo's "make it for me", in the middle of the screen. */
+  const openCreate = () => {
+    changeTool("pen")
+    const { w, h } = sizeRef.current
+    const at = toBoard(Math.max(12, w / 2 - 170), Math.max(12, h / 2 - 140))
+    flushSync(() => setComposer({ x: at.x, y: at.y, prompt: "", photo: null }))
   }
 
   const onPhotoPicked = async (file: File | undefined) => {
     if (!file) return
     try {
-      const photo = await photoToJpeg(file)
-      const { w, h } = sizeRef.current
-      const at = toBoard(Math.max(12, w / 2 - 170), Math.max(12, h / 2 - 160))
-      setComposer({ x: at.x, y: at.y, prompt: "Turn this into a diagram", photo })
+      setPhotoChoice({ file, photo: await photoToJpeg(file) })
     } catch {
       flash("Couldn't read that photo")
     }
+  }
+
+  /** "Draw on it": put the photo on the board, under the ink, centered on screen. */
+  const addPhotoToBoard = async () => {
+    const pc = photoChoice
+    const b = activeBoard()
+    setPhotoChoice(null)
+    if (!pc || !b) return
+    try {
+      const p = await photoToJpeg(pc.file, 1400, 0.8)
+      const vis = visibleRect()
+      const scale = Math.min(1, (vis.w - 48) / p.w, (vis.h - 180 / vis.k) / p.h)
+      const w = p.w * scale
+      const h = p.h * scale
+      const image: BoardImage = {
+        id: crypto.randomUUID(),
+        pos: { x: vis.x + Math.max(8, (vis.w - w) / 2), y: vis.y + Math.max(8, (vis.h - h - 70 / vis.k) / 2) },
+        w: p.w,
+        h: p.h,
+        scale,
+        src: p.dataUrl,
+        createdAt: Date.now(),
+      }
+      pushUndo(b.id, { type: "image-add", image })
+      patchBoard(b.id, (bd) => ({ ...bd, images: [...(bd.images ?? []), image] }))
+      setSelected({ type: "image", id: image.id })
+    } catch {
+      flash("Couldn't read that photo")
+    }
+  }
+
+  /** "Make a diagram": open the Create box with the photo attached. */
+  const createFromPhoto = () => {
+    const pc = photoChoice
+    setPhotoChoice(null)
+    if (!pc) return
+    const { w, h } = sizeRef.current
+    const at = toBoard(Math.max(12, w / 2 - 170), Math.max(12, h / 2 - 160))
+    flushSync(() => setComposer({ x: at.x, y: at.y, prompt: "Turn this into a diagram", photo: pc.photo }))
   }
   // Paste an image (Cmd/Ctrl+V) or drop one on the board: same flow as the Photo button.
   const photoRef = useRef<(f: File) => void>(() => {})
@@ -1085,7 +1289,7 @@ export default function Whiteboard() {
       const card = (b.cards ?? []).find((c) => c.id === ed.cardId)
       const prev = card?.type === "diagram" ? card.diagram.nodes.find((n) => n.id === ed.nodeId)?.fill : undefined
       if ((prev ?? "") === text) return
-      pushUndo(b.id, { type: "fill", cardId: ed.cardId, nodeId: ed.nodeId, prev })
+      pushUndo(b.id, { type: "fill", cardId: ed.cardId, nodeId: ed.nodeId, prev, next: text || undefined })
       patchBoard(b.id, (bd) => ({ ...bd, cards: setFill(bd.cards ?? [], ed.cardId, ed.nodeId, text || undefined) }))
     } else if (ed.kind === "new") {
       if (!text) return
@@ -1106,7 +1310,7 @@ export default function Whiteboard() {
         pushUndo(b.id, { type: "text-del", text: t, index })
         patchBoard(b.id, (bd) => bump({ ...bd, texts: (bd.texts ?? []).filter((x) => x.id !== t.id) }))
       } else {
-        pushUndo(b.id, { type: "text-edit", id: t.id, prev: t.text })
+        pushUndo(b.id, { type: "text-edit", id: t.id, prev: t.text, next: text })
         patchBoard(b.id, (bd) => bump({ ...bd, texts: (bd.texts ?? []).map((x) => (x.id === t.id ? { ...x, text } : x)) }))
       }
     }
@@ -1151,6 +1355,8 @@ export default function Whiteboard() {
   }
 
   const changeTool = (t: Tool) => {
+    if (idleTimer.current) clearTimeout(idleTimer.current) // switching tools means you're not done
+    idleTimer.current = null
     toolRef.current = t
     setTool(t)
     if (t === "ask") flash("Tap where the answer should go")
@@ -1181,6 +1387,26 @@ export default function Whiteboard() {
         onPointerCancel={onPointerEnd}
         onContextMenu={(e) => e.preventDefault()}
       >
+        {/* photos sit under the ink so you can draw on them */}
+        <div
+          className="pointer-events-none absolute left-0 top-0 origin-top-left"
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
+        >
+          {(board.images ?? []).map((im) => {
+            const p = imgDrag?.id === im.id ? imgDrag : im.pos
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={im.id}
+                src={im.src}
+                alt=""
+                draggable={false}
+                className="absolute max-w-none select-none"
+                style={{ left: p.x, top: p.y, width: im.w * im.scale, height: im.h * im.scale }}
+              />
+            )
+          })}
+        </div>
         <canvas ref={inkRef} className="absolute inset-0 h-full w-full" />
         <canvas ref={liveRef} className="absolute inset-0 h-full w-full" />
         <div
@@ -1189,6 +1415,13 @@ export default function Whiteboard() {
         >
         <AnswerOverlay
           answers={board.answers}
+          images={board.images ?? []}
+          onMoveImage={moveImage}
+          onDragImage={(id, p) => setImgDrag(p ? { id, ...p } : null)}
+          onScaleImage={scaleImage}
+          onScaleImageDone={finishImageScale}
+          onScaleCard={scaleCard}
+          onScaleCardDone={finishScale}
           cards={board.cards ?? []}
           pending={pending.filter((p) => p.boardId === board.id)}
           width={size.w}
@@ -1221,6 +1454,14 @@ export default function Whiteboard() {
           />
         )}
         </div>
+        {photoChoice && (
+          <PhotoChoice
+            preview={photoChoice.photo.dataUrl}
+            onAdd={() => void addPhotoToBoard()}
+            onCreate={createFromPhoto}
+            onCancel={() => setPhotoChoice(null)}
+          />
+        )}
         {composer && (
           <Composer
             key={`${composer.x},${composer.y}`}
@@ -1314,15 +1555,20 @@ export default function Whiteboard() {
         open={state.sidebarOpen}
         onSelect={selectBoard}
         onAdd={addBoard}
+        canClear={!isBlank(state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0])}
+        onClear={clearBoard}
       />
       <Toolbar
         tool={tool}
         onTool={changeTool}
         canUndo={canUndo}
         onUndo={undo}
+        canRedo={canRedo}
+        onRedo={redo}
         canClear={!isBlank(state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0])}
         onClear={clearBoard}
         onPhoto={() => photoInput.current?.click()}
+        onCreate={openCreate}
         busy={busy}
         onAnalyze={analyzeNow}
       />

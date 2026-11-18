@@ -50,6 +50,13 @@ function shifted(g: Glyph, dy: number): Glyph {
   return { width: g.width * 0.6, strokes: g.strokes.map((st) => st.map(([x, y]) => [x * 0.6, y * 0.55 + dy] as [number, number])) }
 }
 
+/** Closing marks the user never writes: each is the opening mark drawn backwards. */
+const MIRROR: Record<string, string> = { ")": "(", "]": "[", "}": "{", ">": "<", "≥": "≤" }
+
+function flipped(g: Glyph): Glyph {
+  return { width: g.width, strokes: g.strokes.map((st) => st.map(([x, y]) => [+(g.width - x).toFixed(3), y] as [number, number])) }
+}
+
 export function glyphSetFor(user: UserGlyphs, handwriting: boolean): GlyphSet {
   if (!handwriting) return builtinGlyphs
   const cache = new Map<string, Glyph | undefined>()
@@ -63,6 +70,7 @@ export function glyphSetFor(user: UserGlyphs, handwriting: boolean): GlyphSet {
       if (sup >= 0 && user[String(sup)]) g = shifted(user[String(sup)], -0.08)
       else if (sub >= 0 && user[String(sub)]) g = shifted(user[String(sub)], 0.62)
       else if (ch === "−" && user["-"]) g = user["-"]
+      else if (MIRROR[ch] && user[MIRROR[ch]]) g = flipped(user[MIRROR[ch]])
       else g = builtinGlyphs.get(ch)
       cache.set(ch, g)
       return g

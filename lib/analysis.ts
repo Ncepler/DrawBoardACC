@@ -5,7 +5,7 @@ import { truncateWords, KIND_LIMITS } from "./format"
 import { drawStroke } from "./ink"
 import { FONT_STACK, wrapLines } from "./measure"
 import { TEXT_LINE, TEXT_PAD, textBoxSize } from "./texts"
-import type { Answer, AnswerItem, AnswerKind, Card, Stroke, TextBox } from "./types"
+import type { Answer, AnswerItem, AnswerKind, BoardImage, Card, Stroke, TextBox } from "./types"
 
 export type ExportRegion = { x: number; y: number; w: number; h: number }
 
@@ -37,6 +37,7 @@ export async function exportBoardPng(
   answers: AnswerRect[],
   viewW: number,
   viewH: number,
+  images: BoardImage[] = [],
 ) {
   const pad = 24
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
@@ -47,6 +48,12 @@ export async function exportBoardPng(
       x1 = Math.max(x1, p.x + pad)
       y1 = Math.max(y1, p.y + pad)
     }
+  }
+  for (const im of images) {
+    x0 = Math.min(x0, im.pos.x - pad)
+    y0 = Math.min(y0, im.pos.y - pad)
+    x1 = Math.max(x1, im.pos.x + im.w * im.scale + pad)
+    y1 = Math.max(y1, im.pos.y + im.h * im.scale + pad)
   }
   const diagrams = cards.filter((c) => c.type === "diagram")
   for (const c of diagrams) {
@@ -86,6 +93,19 @@ export async function exportBoardPng(
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.scale(scale, scale)
   ctx.translate(-region.x, -region.y)
+  for (const im of images) {
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image()
+        el.onload = () => resolve(el)
+        el.onerror = reject
+        el.src = im.src
+      })
+      ctx.drawImage(img, im.pos.x, im.pos.y, im.w * im.scale, im.h * im.scale)
+    } catch {
+      // an unreadable photo is skipped, the ink still goes
+    }
+  }
   for (const c of diagrams) {
     if (c.type !== "diagram") continue
     try {

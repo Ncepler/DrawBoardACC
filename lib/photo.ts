@@ -1,6 +1,6 @@
 // Prepares a user photo for Gemini: decoded by the browser (so EXIF rotation is
 // applied), scaled so the long side is at most 1600px, re-encoded as JPEG.
-export async function photoToJpeg(file: File, max = 1600): Promise<{ dataUrl: string; base64: string }> {
+export async function photoToJpeg(file: File, max = 1600, quality = 0.85): Promise<{ dataUrl: string; base64: string; w: number; h: number }> {
   const url = URL.createObjectURL(file)
   try {
     const img = new Image()
@@ -15,8 +15,8 @@ export async function photoToJpeg(file: File, max = 1600): Promise<{ dataUrl: st
     ctx.fillStyle = "#fff"
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85)
-    return { dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) }
+    const dataUrl = canvas.toDataURL("image/jpeg", quality)
+    return { dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1), w: canvas.width, h: canvas.height }
   } finally {
     URL.revokeObjectURL(url)
   }
