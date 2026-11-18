@@ -16,7 +16,7 @@ export function strokeOptions(real: boolean, size: number, last: boolean) {
   }
 }
 
-function outlineToPath(outline: number[][]): Path2D | null {
+export function outlineToPath(outline: number[][]): Path2D | null {
   if (outline.length < 4) return null
   const path = new Path2D()
   let [px, py] = outline[0]
