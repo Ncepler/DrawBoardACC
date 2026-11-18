@@ -1,5 +1,6 @@
 import { getStroke } from "perfect-freehand"
 import { outlineToPath } from "./ink"
+import { markSupers, tokens } from "./rich"
 
 /**
  * A glyph is a set of pen strokes in a unit box: y runs 0 (top) to 1 (bottom),
@@ -96,6 +97,7 @@ const GLYPHS: Record<string, Glyph> = {
   x: { width: 0.5, strokes: [line([0.04, 0.4], [0.46, 1]), line([0.46, 0.4], [0.04, 1])] },
   "×": { width: 0.5, strokes: [line([0.06, 0.38], [0.44, 0.86]), line([0.44, 0.38], [0.06, 0.86])] },
   y: { width: 0.5, strokes: [line([0.04, 0.4], [0.26, 0.86]), curve([[0.48, 0.4], [0.3, 0.9], [0.2, 1.12], [0.06, 1.2]])] },
+  "÷": { width: 0.6, strokes: [line([0.04, 0.55], [0.56, 0.55]), line([0.3, 0.2], [0.3, 0.21], 1), line([0.3, 0.89], [0.3, 0.9], 1)] },
   " ": { width: 0.15, strokes: [] },
 }
 GLYPHS["−"] = GLYPHS["-"]
@@ -128,6 +130,9 @@ function fallbackWidth(ch: string) {
   return measureCtx.measureText(ch).width / 100
 }
 
+const SUP_SCALE = 0.55 // exponents are drawn this much smaller
+const SUP_RISE = -0.06 // and start this far above the line (in glyph heights)
+
 /** Advance of one character in units of glyph height. `loose`: characters without a glyph are typeset. */
 function advance(ch: string, set: GlyphSet, loose: boolean): number | null {
   const g = set.get(ch)
@@ -138,13 +143,14 @@ function advance(ch: string, set: GlyphSet, loose: boolean): number | null {
 /**
  * Width of a run of text in units of glyph height. Strict (default): null if any
  * character has no glyph. Loose: missing characters are typeset instead.
+ * Exponents (^(…)) count at their smaller size.
  */
 export function measureRun(text: string, set: GlyphSet = builtinGlyphs, loose = false): number | null {
   let w = 0
-  for (const ch of text) {
+  for (const { ch, sup } of tokens(text)) {
     const a = advance(ch, set, loose)
     if (a === null) return null
-    w += a
+    w += sup ? a * SUP_SCALE : a
   }
   return Math.max(0, w - SPACING)
 }
@@ -153,7 +159,7 @@ export function measureRun(text: string, set: GlyphSet = builtinGlyphs, loose = 
 export function wrapRun(text: string, set: GlyphSet, maxUnits: number): string[] {
   const lines: string[] = []
   let line = ""
-  for (const word of text.split(/\s+/).filter(Boolean)) {
+  for (const word of markSupers(text).split(/\s+/).filter(Boolean)) {
     const next = line ? `${line} ${word}` : word
     if ((measureRun(next, set, true) ?? 0) <= maxUnits || !line) line = next
     else {
@@ -180,30 +186,33 @@ export function drawRun(
 ) {
   ctx.fillStyle = color
   let cursor = x
-  for (const ch of text) {
+  for (const { ch, sup } of tokens(text)) {
+    const k = sup ? SUP_SCALE : 1
+    const gh = h * k
+    const top = sup ? y + SUP_RISE * h : y
     const g = set.get(ch)
     if (!g) {
-      ctx.font = `400 ${h * FALLBACK_EM}px ${FALLBACK_FONT}`
+      ctx.font = `400 ${gh * FALLBACK_EM}px ${FALLBACK_FONT}`
       ctx.textBaseline = "alphabetic"
-      ctx.fillText(ch, cursor, y + h)
-      cursor += (fallbackWidth(ch) + SPACING) * h
+      ctx.fillText(ch, cursor, top + gh)
+      cursor += (fallbackWidth(ch) + SPACING) * gh
       continue
     }
     for (const stroke of g.strokes) {
-      const pts = stroke.map(([gx, gy]) => ({ x: cursor + gx * h, y: y + gy * h }))
+      const pts = stroke.map(([gx, gy]) => ({ x: cursor + gx * gh, y: top + gy * gh }))
       const outline = getStroke(pts, {
-        size: h * 0.085,
+        size: gh * 0.085,
         thinning: 0,
         smoothing: 0.5,
         streamline: 0.3,
         simulatePressure: false,
         start: { cap: true, taper: 0 },
-        end: { cap: true, taper: h * 0.06 },
+        end: { cap: true, taper: gh * 0.06 },
         last: true,
       })
       const path = outlineToPath(outline)
       if (path) ctx.fill(path)
     }
-    cursor += (g.width + SPACING) * h
+    cursor += (g.width + SPACING) * gh
   }
 }

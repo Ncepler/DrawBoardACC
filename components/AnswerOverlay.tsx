@@ -4,8 +4,10 @@ import { useEffect, useRef, type ReactNode } from "react"
 import Draggable from "./Draggable"
 import { NOTE_BODY_PX, NOTE_LINE, NOTE_PAD, NOTE_TITLE_PX, NOTE_W, cardSize, noteLines } from "@/lib/cards"
 import { DARK_SCREEN_COLORS, DIAGRAM_HANDLE, SCREEN_COLORS, diagramSvg, layoutDiagram } from "@/lib/diagram"
+import { GRAPH_COLORS, GRAPH_COLORS_DARK, GRAPH_HANDLE, graphSvg } from "@/lib/graph"
 import { builtinGlyphs, drawRun, measureRun, wrapRun, type GlyphSet } from "@/lib/glyphs"
 import { textWidth, wrapLines } from "@/lib/measure"
+import { richRuns } from "@/lib/rich"
 import { TEXT_LINE, TEXT_PAD, textBoxSize } from "@/lib/texts"
 import type { Answer, Card, TextBox } from "@/lib/types"
 
@@ -24,10 +26,33 @@ const EXPLAIN_PX = 15
 const EXPLAIN_LINE = 21
 const EXPLAIN_PAD = 12
 
+const SUP_PX = 0.65 // exponent size relative to the line
+
+/** Width of text with raised exponents (^(…)). */
+const richWidth = (text: string, px: number, weight = 400) =>
+  richRuns(text).reduce((w, r) => w + textWidth(r.t, r.sup ? px * SUP_PX : px, weight), 0)
+
+/** Text with exponents drawn raised and small. */
+function Rich({ text }: { text: string }) {
+  return (
+    <>
+      {richRuns(text).map((r, i) =>
+        r.sup ? (
+          <sup key={i} style={{ fontSize: `${SUP_PX}em`, lineHeight: 0, verticalAlign: "0.55em" }}>
+            {r.t}
+          </sup>
+        ) : (
+          <span key={i}>{r.t}</span>
+        ),
+      )}
+    </>
+  )
+}
+
 /** Font size following the handwriting (height of what was written), capped and fitted to the screen. */
 function answerFontSize(a: Answer, maxW: number) {
   const ideal = Math.min(MAX_TEXT_PX, Math.max(14, a.box.h / 0.72))
-  const natural = textWidth(a.text, ideal, 500) + ideal * 0.7
+  const natural = richWidth(a.text, ideal, 500) + ideal * 0.7
   const fit = natural > maxW - 8 ? ideal * ((maxW - 8) / natural) : ideal
   return Math.round(Math.max(10, fit))
 }
@@ -35,7 +60,7 @@ function answerFontSize(a: Answer, maxW: number) {
 export const textAnswerRenderer: AnswerRenderer = {
   measure(a, maxW) {
     const fs = answerFontSize(a, maxW)
-    return { w: Math.ceil(textWidth(a.text, fs, 500) + fs * 0.7), h: Math.round(fs * 1.25) }
+    return { w: Math.ceil(richWidth(a.text, fs, 500) + fs * 0.7), h: Math.round(fs * 1.25) }
   },
   renderAnswer(a, maxW) {
     return (
@@ -43,7 +68,7 @@ export const textAnswerRenderer: AnswerRenderer = {
         className="absolute left-0 top-0 whitespace-nowrap font-medium leading-none"
         style={{
           fontSize: answerFontSize(a, maxW),
-          padding: "0.12em 0.35em",
+          padding: a.text.includes("^") ? "0.3em 0.35em 0.06em" : "0.12em 0.35em",
           borderRadius: "0.3em",
           color: "var(--ai)",
           background: "var(--surface)",
@@ -52,7 +77,7 @@ export const textAnswerRenderer: AnswerRenderer = {
           fontStyle: a.confidence === "low" ? "italic" : "normal",
         }}
       >
-        {a.text}
+        <Rich text={a.text} />
       </div>
     )
   },
@@ -188,12 +213,12 @@ const GAP = 8
 const overlaps = (a: Rect, b: Rect) =>
   a.left < b.left + b.w && a.left + a.w > b.left && a.top < b.top + b.h && a.top + a.h > b.top
 
-/** Prefer right of what it answers, then below, left, above; stay on-screen, avoid other items. */
-function place(answers: Answer[], cards: Card[], vw: number, vh: number, renderer: AnswerRenderer) {
+/** Prefer right of what it answers, then below, left, above; avoid other items. */
+export function placeAnswers(answers: Answer[], cards: Card[], maxW: number, renderer: AnswerRenderer) {
   const placed: Rect[] = cards.map((c) => ({ left: c.pos.x, top: c.pos.y, ...cardSize(c) }))
   const out = new Map<string, Rect>()
   for (const a of answers) {
-    const { w, h: H } = renderer.measure(a, vw - 16)
+    const { w, h: H } = renderer.measure(a, maxW)
     if (a.pos) {
       const r = { left: a.pos.x, top: a.pos.y, w, h: H }
       placed.push(r)
@@ -208,16 +233,8 @@ function place(answers: Answer[], cards: Card[], vw: number, vh: number, rendere
       { left: x - GAP - w, top: midY, w, h: H },
       { left: x, top: y - GAP - H, w, h: H },
     ]
-    const inBounds = (r: Rect) => r.left >= 4 && r.top >= 4 && r.left + r.w <= vw - 4 && r.top + r.h <= vh - 4
-    let chosen = candidates.find((r) => inBounds(r) && !placed.some((p) => overlaps(r, p)))
-    if (!chosen) {
-      const c = candidates[0]
-      chosen = {
-        ...c,
-        left: Math.min(Math.max(4, c.left), Math.max(4, vw - w - 4)),
-        top: Math.min(Math.max(4, c.top), Math.max(4, vh - H - 4)),
-      }
-    }
+    // The board is unbounded, so there is no screen edge to stay inside: take the first free side.
+    const chosen = candidates.find((r) => !placed.some((p) => overlaps(r, p))) ?? candidates[0]
     placed.push(chosen)
     out.set(a.id, chosen)
   }
@@ -267,6 +284,20 @@ function DiagramCard({ card, dark }: { card: Extract<Card, { type: "diagram" }>;
   )
 }
 
+function GraphCard({ card, dark }: { card: Extract<Card, { type: "graph" }>; dark: boolean }) {
+  const { w, h } = cardSize(card)
+  return (
+    <div
+      className="absolute left-0 top-0 origin-top-left"
+      style={{ width: w, height: h }}
+      // Transparent so the student's ink on the graph stays visible. Text is escaped in graphSvg.
+      dangerouslySetInnerHTML={{
+        __html: graphSvg(card.graph, dark ? GRAPH_COLORS_DARK : GRAPH_COLORS).replace("<svg ", `<svg style="width:${w}px;height:${h}px" `),
+      }}
+    />
+  )
+}
+
 export type Selection = { type: "answer" | "card" | "text"; id: string } | null
 
 /** Text the student typed: same color as their ink, not AI blue. */
@@ -288,7 +319,7 @@ export default function AnswerOverlay({
   editingTextId,
   pending,
   width,
-  height,
+  scale,
   selected,
   onSelect,
   onMoveAnswer,
@@ -308,8 +339,8 @@ export default function AnswerOverlay({
   texts: TextBox[]
   editingTextId: string | null
   pending: { id: string; x: number; y: number }[]
-  width: number
-  height: number
+  width: number // screen width, used only to cap answer size
+  scale: number // board zoom
   selected: Selection
   onSelect: (s: Selection) => void
   onMoveAnswer: (id: string, x: number, y: number) => void
@@ -325,11 +356,10 @@ export default function AnswerOverlay({
   handwriting?: boolean
 }) {
   const renderer = makeDefaultRenderer(glyphs, aiColor, handwriting)
-  const positions = place(answers, cards, width, height, renderer)
+  const positions = placeAnswers(answers, cards, width - 16, renderer)
   const maxW = width - 16
-  const bounds = { w: width, h: height }
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-live="polite">
+    <div className="pointer-events-none absolute left-0 top-0" aria-live="polite">
       {cards.map((c) => {
         const { w, h } = cardSize(c)
         const sel = selected?.type === "card" && selected.id === c.id
@@ -340,19 +370,19 @@ export default function AnswerOverlay({
             y={c.pos.y}
             w={w}
             h={h}
-            bounds={bounds}
+            scale={scale}
             selected={sel}
             onSelect={() => onSelect(sel ? null : { type: "card", id: c.id })}
             onMove={(x, y) => onMoveCard(c.id, x, y)}
             onDelete={() => onDelete({ type: "card", id: c.id })}
-            handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : undefined}
+            handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : c.type === "graph" ? GRAPH_HANDLE * c.scale : undefined}
           >
-            {c.type === "note" ? <NoteCard card={c} /> : <DiagramCard card={c} dark={dark} />}
+            {c.type === "note" ? <NoteCard card={c} /> : c.type === "graph" ? <GraphCard card={c} dark={dark} /> : <DiagramCard card={c} dark={dark} />}
             {c.type === "diagram" && c.diagram.nodes.some((n) => n.blank && n.fill) && (
               <button
                 type="button"
                 className="pointer-events-auto absolute left-0 flex h-11 items-center rounded-full bg-[#007AFF] px-4 text-[15px] font-medium text-white shadow [touch-action:manipulation] active:opacity-80"
-                style={{ top: h + 8 }}
+                style={{ top: h + 8, transform: `scale(${1 / scale})`, transformOrigin: "0 0" }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onPointerUp={(e) => e.stopPropagation()}
                 onClick={(e) => {
@@ -376,7 +406,7 @@ export default function AnswerOverlay({
             y={r.top}
             w={r.w}
             h={r.h}
-            bounds={bounds}
+            scale={scale}
             selected={sel}
             onSelect={() => onSelect(sel ? null : { type: "answer", id: a.id })}
             onMove={(x, y) => onMoveAnswer(a.id, x, y)}
@@ -397,7 +427,7 @@ export default function AnswerOverlay({
             y={t.pos.y}
             w={w}
             h={h}
-            bounds={bounds}
+            scale={scale}
             selected={sel}
             // tap a selected box (or any box with the Text tool) to edit it
             onSelect={() => (sel || textTool ? onEditText(t.id) : onSelect({ type: "text", id: t.id }))}
@@ -412,7 +442,7 @@ export default function AnswerOverlay({
         <div
           key={p.id}
           className="absolute flex items-center gap-2 rounded-full bg-[var(--chrome-strong)] px-3 py-2 text-[14px] text-[var(--ai-text)] shadow-[0_0_0_0.5px_var(--ai-ring),0_2px_10px_rgba(0,0,0,0.08)]"
-          style={{ left: p.x, top: p.y }}
+          style={{ left: p.x, top: p.y, transform: `scale(${1 / scale})`, transformOrigin: "0 0" }}
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" />
           Thinking…

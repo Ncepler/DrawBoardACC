@@ -1,5 +1,6 @@
 // Sizing for AI cards (notes and diagrams) on the overlay.
 import { layoutDiagram } from "./diagram"
+import { GRAPH_H, GRAPH_W } from "./graph"
 import { wrapLines } from "./measure"
 import type { Card, CardPayload } from "./types"
 
@@ -19,6 +20,7 @@ export function naturalSize(c: CardPayload): { w: number; h: number } {
     const l = layoutDiagram(c.diagram)
     return { w: l.w, h: l.h }
   }
+  if (c.type === "graph") return { w: GRAPH_W, h: GRAPH_H }
   const titleLines = wrapLines(c.title, NOTE_TITLE_PX, NOTE_W - 2 * NOTE_PAD, 600).length
   return { w: NOTE_W, h: NOTE_PAD * 2 + titleLines * 20 + 6 + noteLines(c.text).length * NOTE_LINE }
 }
