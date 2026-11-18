@@ -7,10 +7,10 @@ import type { UserGlyphs } from "@/lib/settings"
 import type { Point } from "@/lib/types"
 
 const SETS = [
-  { id: "num", label: "Numbers & symbols", chars: [..."0123456789+-=×/().,?!%"] },
+  { id: "num", label: "Numbers & symbols", chars: [..."0123456789+-=×/(.,?!%"] },
   { id: "lower", label: "Lowercase", chars: [..."abcdefghijklmnopqrstuvwxyz"] },
   { id: "upper", label: "Uppercase", chars: [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"] },
-  { id: "sym", label: "More symbols", chars: [..."÷π√^<>≤≥≠≈±°∞Δθ→:;'\"[]{}*_&"] },
+  { id: "sym", label: "More symbols", chars: [..."÷π√^<≤≠≈±°∞Δθ→:;'\"[{*_&"] },
 ]
 export const HANDWRITING_CHAR_COUNT = SETS.reduce((n, s) => n + s.chars.length, 0)
 
@@ -216,7 +216,7 @@ export default function HandwritingSetup({
         <div>
           <h2 className="text-[17px] font-semibold text-[var(--text)]">Your handwriting</h2>
           <p className="text-[13px] text-[var(--text-muted)]">
-            Write each character between the lines. {done} of {HANDWRITING_CHAR_COUNT} done.
+            Write each character between the lines. {done} of {HANDWRITING_CHAR_COUNT} done. Closing marks (the ones facing the other way) are flipped from yours.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

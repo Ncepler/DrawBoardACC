@@ -1,4 +1,6 @@
-export const IDLE_MS = 2500
+// Auto-analyze waits for this long of stillness (no stroke, no pointer movement) after the last pen stroke.
+export const IDLE_MS = 1200
+export const IDLE_MOVE_PX = 4
 // Idle-triggered analysis is off for now: the Analyze button / Enter key run it instead.
 export const AUTO_ANALYZE = false
 export const MAX_ANSWER_WORDS = 6

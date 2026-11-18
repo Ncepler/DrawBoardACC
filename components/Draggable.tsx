@@ -20,6 +20,7 @@ export default function Draggable({
   onDelete,
   handle,
   actions,
+  resize,
   children,
 }: {
   x: number
@@ -38,8 +39,12 @@ export default function Draggable({
   handle?: number
   /** Shown at the top-left corner while selected (for example the typed/handwriting toggle). */
   actions?: ReactNode
+  /** Corner handle (shown while selected) that scales the item: onLive while dragging, onDone with the old and new scale. */
+  resize?: { scale: number; onLive: (scale: number) => void; onDone: (prev: number, next: number) => void }
   children: ReactNode
 }) {
+  const rz = useRef<{ ox: number; oy: number; d0: number; s0: number; cur: number } | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const grab = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null)
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
   const left = drag?.x ?? x
@@ -59,6 +64,7 @@ export default function Draggable({
 
   return (
     <div
+      ref={rootRef}
       className={`${handle ? "pointer-events-none" : "pointer-events-auto"} absolute select-none [-webkit-touch-callout:none] [touch-action:none]`}
       style={{
         left,
@@ -117,6 +123,47 @@ export default function Draggable({
           {actions}
         </div>
       ) : null}
+      {selected && resize && (
+        <div
+          role="button"
+          aria-label="Drag to resize"
+          className="pointer-events-auto absolute flex h-11 w-11 cursor-nwse-resize items-center justify-center [touch-action:none]"
+          style={{ right: -26, bottom: -26, transform: `scale(${1 / es})` }}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            const r = rootRef.current?.getBoundingClientRect()
+            if (!r) return
+            e.currentTarget.setPointerCapture(e.pointerId)
+            const d0 = Math.max(20, Math.hypot(e.clientX - r.left, e.clientY - r.top))
+            rz.current = { ox: r.left, oy: r.top, d0, s0: resize.scale, cur: resize.scale }
+          }}
+          onPointerMove={(e) => {
+            const g = rz.current
+            if (!g) return
+            e.stopPropagation()
+            g.cur = Math.min(4, Math.max(0.2, (g.s0 * Math.hypot(e.clientX - g.ox, e.clientY - g.oy)) / g.d0))
+            resize.onLive(g.cur)
+          }}
+          onPointerUp={(e) => {
+            e.stopPropagation()
+            const g = rz.current
+            rz.current = null
+            if (g) resize.onDone(g.s0, g.cur)
+          }}
+          onPointerCancel={(e) => {
+            e.stopPropagation()
+            const g = rz.current
+            rz.current = null
+            if (g) resize.onDone(g.s0, g.cur)
+          }}
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#007AFF] text-white shadow">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
+            </svg>
+          </span>
+        </div>
+      )}
       {selected && (
         <button
           type="button"

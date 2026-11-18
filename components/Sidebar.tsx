@@ -8,12 +8,16 @@ export default function Sidebar({
   open,
   onSelect,
   onAdd,
+  canClear,
+  onClear,
 }: {
   boards: Board[]
   activeId: string
   open: boolean
   onSelect: (id: string) => void
   onAdd: () => void
+  canClear: boolean
+  onClear: () => void
 }) {
   return (
     <aside
@@ -53,6 +57,18 @@ export default function Sidebar({
           <path d="M12 5v14M5 12h14" />
         </svg>
         Add board
+      </button>
+      <button
+        type="button"
+        disabled={!canClear}
+        onClick={onClear}
+        title="Clears everything on this board (Undo brings it back)"
+        className="flex h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-[15px] text-[#FF3B30] [touch-action:manipulation] active:bg-[var(--press)] disabled:opacity-30"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 7h14M10 7V5h4v2M7 7l.8 12h8.4L17 7M10.5 11v5M13.5 11v5" />
+        </svg>
+        Clear whole board
       </button>
       <a
         href="/demo"

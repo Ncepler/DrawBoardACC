@@ -21,6 +21,8 @@ export default function Toolbar({
   onTool,
   canUndo,
   onUndo,
+  canRedo,
+  onRedo,
   canClear,
   onClear,
   onPhoto,
@@ -31,6 +33,8 @@ export default function Toolbar({
   onTool: (t: Tool) => void
   canUndo: boolean
   onUndo: () => void
+  canRedo: boolean
+  onRedo: () => void
   canClear: boolean
   onClear: () => void
   onPhoto: () => void
@@ -67,6 +71,12 @@ export default function Toolbar({
         <svg {...icon}>
           <path d="M9 14L4 9l5-5" />
           <path d="M4 9h10a6 6 0 010 12h-3" />
+        </svg>
+      </button>
+      <button type="button" aria-label="Redo" disabled={!canRedo} className={`${btn} ${idle}`} onClick={onRedo}>
+        <svg {...icon}>
+          <path d="M15 14l5-5-5-5" />
+          <path d="M20 9H10a6 6 0 000 12h3" />
         </svg>
       </button>
       <button type="button" aria-label="Clear board" title="Clear board (Undo brings it back)" disabled={!canClear} className={`${btn} ${idle}`} onClick={onClear}>

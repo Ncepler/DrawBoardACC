@@ -345,6 +345,8 @@ export default function AnswerOverlay({
   onMoveAnswer,
   onMoveCard,
   onDelete,
+  onScaleCard,
+  onScaleCardDone,
   onMoveText,
   onEditText,
   onCheck,
@@ -368,6 +370,8 @@ export default function AnswerOverlay({
   onMoveAnswer: (id: string, x: number, y: number) => void
   onMoveCard: (id: string, x: number, y: number) => void
   onDelete: (s: NonNullable<Selection>) => void
+  onScaleCard: (id: string, scale: number) => void
+  onScaleCardDone: (id: string, prev: number, next: number) => void
   onMoveText: (id: string, x: number, y: number) => void
   onEditText: (id: string) => void
   onCheck: (cardId: string) => void
@@ -399,6 +403,7 @@ export default function AnswerOverlay({
             onSelect={() => onSelect(sel ? null : { type: "card", id: c.id })}
             onMove={(x, y) => onMoveCard(c.id, x, y)}
             onDelete={() => onDelete({ type: "card", id: c.id })}
+            resize={{ scale: c.scale, onLive: (v) => onScaleCard(c.id, v), onDone: (a, b) => onScaleCardDone(c.id, a, b) }}
             handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : c.type === "graph" ? GRAPH_HANDLE * c.scale : undefined}
           >
             {c.type === "note" ? <NoteCard card={c} /> : c.type === "graph" ? <GraphCard card={c} dark={dark} /> : <DiagramCard card={c} dark={dark} />}
