@@ -30,7 +30,8 @@ export function exportInkPng(strokes: Stroke[], viewW: number, viewH: number) {
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.scale(scale, scale)
   ctx.translate(-region.x, -region.y)
-  for (const s of strokes) drawStroke(ctx, { ...s, color: INK_COLOR })
+  // Thicker than on screen so thin strokes stay legible after downscaling.
+  for (const s of strokes) drawStroke(ctx, { ...s, color: INK_COLOR, width: Math.max(s.width * 1.5, 4 / scale) })
   const dataUrl = canvas.toDataURL("image/png")
   return { base64: dataUrl.slice(dataUrl.indexOf(",") + 1), region }
 }

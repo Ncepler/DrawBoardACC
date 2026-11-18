@@ -14,7 +14,17 @@ const RATE_LIMIT_PER_IP = 12 // per minute
 const RATE_LIMIT_GLOBAL = 60 // per minute, per server instance
 const WINDOW_MS = 60_000
 
-const INSTRUCTION = `This is a hand-drawn whiteboard (study diagrams). Find every question mark the user drew that means "what is this called / what goes here". Use surrounding labels, arrows, and diagram structure to decide what the question mark refers to. Answer in 6 words or fewer: a term or short phrase, never a sentence. If you cannot tell, return low confidence rather than inventing an answer. Ignore question marks that are clearly part of normal writing (like "why?"). If there are none, return found=false and an empty items list. For each item, "box" is the bounding box of the question mark itself as [ymin, xmin, ymax, xmax], normalized to 0-1000.`
+const INSTRUCTION = `You read hand-drawn whiteboards. The image is a whiteboard with handwriting and diagrams.
+
+Step 1: find EVERY question mark the user drew. Hand-drawn question marks are usually a hook on top of a short vertical stroke, often with the dot missing, tiny, or separated from the stroke. A question mark can be big, small, or slanted. Look carefully at the whole image, including the edges, and look especially after an "=" sign or at the end of a line of writing. If you see a shape like that, count it. Do not skip a question mark just because the handwriting is messy.
+
+Step 2: for each question mark, read the line of writing it belongs to and put your transcription of that line in "reading" (for example "3x^2 + 6x + 9 = ?").
+
+Step 3: give the answer in "answer": at most 6 words, a term, number, or short phrase, never a sentence. For a math problem, solve it and give the result (for example the simplified expression or the value). For a diagram with a missing label, use the surrounding labels, arrows and structure to name what belongs there. If you can read the question but cannot answer it confidently in 6 words, still return the item with your best short answer and confidence "low". Use "high" only when you are sure.
+
+"box" is the tight bounding box of the question mark itself (hook, stem and dot together) as [ymin, xmin, ymax, xmax], normalized to 0-1000.
+
+Return found=false with an empty items list only if there is truly no question mark anywhere in the image.`
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -25,11 +35,12 @@ const RESPONSE_SCHEMA = {
       items: {
         type: "object",
         properties: {
+          reading: { type: "string" },
           box: { type: "array", items: { type: "number" }, minItems: 4, maxItems: 4 },
           answer: { type: "string" },
           confidence: { type: "string", enum: ["high", "low"] },
         },
-        required: ["box", "answer", "confidence"],
+        required: ["reading", "box", "answer", "confidence"],
       },
     },
   },
@@ -128,7 +139,15 @@ export async function POST(req: Request) {
       try {
         res = await ai.models.generateContent({
           model,
-          contents: [{ role: "user", parts: [{ inlineData: { mimeType: "image/png", data: image } }] }],
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { inlineData: { mimeType: "image/png", data: image } },
+                { text: "Find every question mark on this whiteboard and answer each one." },
+              ],
+            },
+          ],
           config: {
             systemInstruction: INSTRUCTION,
             responseMimeType: "application/json",
