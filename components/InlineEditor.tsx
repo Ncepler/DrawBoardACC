@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
 /**
  * In-place text field for the Text tool: typing on the board or into a practice
@@ -31,7 +31,14 @@ export default function InlineEditor({
   const [text, setText] = useState(initial)
   const ref = useRef<HTMLTextAreaElement>(null)
   const done = useRef(false)
-  const lines = Math.max(1, text.split("\n").length)
+
+  // Grow with the content (wrapped lines too) so nothing is cut off.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${el.scrollHeight}px`
+  }, [text])
 
   useEffect(() => {
     const el = ref.current
@@ -51,7 +58,7 @@ export default function InlineEditor({
       ref={ref}
       autoFocus
       value={text}
-      rows={lines}
+      rows={1}
       placeholder={placeholder}
       onChange={(e) => setText(e.target.value)}
       onPointerDown={(e) => e.stopPropagation()}

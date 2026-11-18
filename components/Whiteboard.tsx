@@ -43,6 +43,7 @@ type UndoAction =
   | { type: "text-del"; text: TextBox; index: number }
   | { type: "text-edit"; id: string; prev: string }
   | { type: "fill"; cardId: string; nodeId: string; prev?: string }
+  | { type: "clear"; strokes: Stroke[]; answers: Answer[]; cards: Card[]; texts: TextBox[] }
 
 /** Open Text-tool editor: a new box, an existing box, or a practice blank. */
 type EditorState =
@@ -88,6 +89,8 @@ function freeSpot(at: { x: number; y: number }, w: number, h: number, vw: number
 }
 
 /** Ink-like changes bump inkVersion so auto-analyze notices them. */
+const isBlank = (b: Board) => !b.strokes.length && !b.answers.length && !b.cards?.length && !b.texts?.length
+
 const bump = (b: Board): Board => ({ ...b, inkVersion: b.inkVersion + 1, updatedAt: Date.now() })
 
 /** Sets (or clears) a practice blank's typed answer; editing clears its old check mark. */
@@ -527,6 +530,12 @@ export default function Whiteboard() {
     const isTouch = e.pointerType === "touch"
     setSelected(null)
 
+    if (editor) {
+      // preventDefault below would keep focus in the box, so save it explicitly.
+      ;(document.activeElement as HTMLElement | null)?.blur()
+      if (toolRef.current === "text") return // clicking out only closes the box
+    }
+
     if (toolRef.current === "ask" || toolRef.current === "text") {
       if (isTouch && (penDown.current || now < penUntil.current)) return // palm
       // Open the box on lift, not here: the press would steal focus back from it,
@@ -669,6 +678,13 @@ export default function Whiteboard() {
     if (!board || drawing.current) return
     const action = undoStacks.current.get(board.id)?.pop()
     if (!action) return
+    if (action.type === "clear") {
+      patchBoard(board.id, (b) => bump({ ...b, strokes: action.strokes, answers: action.answers, cards: action.cards, texts: action.texts }))
+      setSelected(null)
+      redrawInk()
+      syncUndo()
+      return
+    }
     if (action.type === "text-add" || action.type === "text-del" || action.type === "text-edit" || action.type === "fill") {
       patchBoard(board.id, (b) => {
         const texts = [...(b.texts ?? [])]
@@ -703,10 +719,9 @@ export default function Whiteboard() {
     }
     patchBoard(board.id, (b) => {
       let strokes = b.strokes
-      let answers = b.answers
+      const answers = b.answers
       if (action.type === "add") {
         strokes = strokes.filter((s) => s.id !== action.stroke.id)
-        answers = pruneAnswers(answers, [action.stroke])
       } else {
         strokes = [...strokes]
         for (const it of [...action.items].sort((a, c) => a.index - c.index)) {
@@ -742,6 +757,17 @@ export default function Whiteboard() {
     stack.push(a)
     undoStacks.current.set(boardId, stack)
     syncUndo()
+  }
+
+  const clearBoard = () => {
+    const b = activeBoard()
+    if (!b || drawing.current || isBlank(b)) return
+    cancelAnalysis()
+    pushUndo(b.id, { type: "clear", strokes: b.strokes, answers: b.answers, cards: b.cards ?? [], texts: b.texts ?? [] })
+    patchBoard(b.id, (bd) => bump({ ...bd, strokes: [], answers: [], cards: [], texts: [] }))
+    setSelected(null)
+    setEditor(null)
+    redrawInk()
   }
 
   const deleteItem = (sel: NonNullable<Selection>) => {
@@ -1039,6 +1065,8 @@ export default function Whiteboard() {
         onTool={changeTool}
         canUndo={canUndo}
         onUndo={undo}
+        canClear={!isBlank(state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0])}
+        onClear={clearBoard}
         onPhoto={() => photoInput.current?.click()}
         busy={busy}
         onAnalyze={analyzeNow}

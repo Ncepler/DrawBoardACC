@@ -84,7 +84,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 ### In scope (built)
 - Full-screen whiteboard canvas with Apple-feel ink using Apple Pencil, finger, or mouse.
 - Left sidebar with boards (Board 1, Board 2, ...), add-board button, Demos link, show/hide toggle.
-- Floating toolbar: pen, eraser, undo | Text (T), Ask, Photo | Analyze.
+- Floating toolbar: pen, eraser, undo, clear board (undoable) | Text (T), Ask, Photo | Analyze.
 - Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause".
 - Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
 - Ask box and Photo → AI notes and diagrams (cycle / flow / tree layouts, optional numbered practice blanks).
@@ -140,16 +140,17 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Canvas fills the viewport (`position: fixed; inset: 0`; safe-area insets on all floating chrome). Board color and ink color follow the theme.
 - Top left: sidebar toggle (always reachable) and the translucent boards sidebar (boards, Add board, Demos). The sidebar floats over the canvas, so toggling never resizes the canvas.
 - Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, demos).
-- Bottom center toolbar: pen, eraser (whole-stroke), undo | Text (T), Ask, Photo | Analyze. Nothing else.
+- Bottom center toolbar: pen, eraser (whole-stroke), undo, clear board (one Undo restores it) | Text (T), Ask, Photo | Analyze. Nothing else.
 - Small notices appear top center (e.g. "Nothing to answer found", "Couldn't analyze: …", "2 of 3 right").
 - All tap targets at least 44px. No hover-only UI, no right-click, nothing that only works with a mouse (keyboard shortcuts are extras: Enter = Analyze, Delete = delete selection, Escape = deselect).
 
 ### Tools and items
 - **Ask**: tap the tool, tap the board where the result should go, type, Create. A "Thinking…" placeholder shows while Gemini works; the result is placed at the nearest free spot.
 - **Photo**: pick or take a photo (downscaled to ≤1600 px JPEG in the browser), optionally change the request (default "Turn this into a diagram"), Create.
-- **Text (T)**: click empty board to type (Enter saves, Shift+Enter new line); click a practice blank to type its answer; click typed text to edit. The tool stays on until another tool is picked.
+- **Text (T)**: click empty board to type (Enter saves, Shift+Enter new line, the box grows with its text); click a practice blank to type its answer; click typed text to edit. Clicking away saves, and that click only closes the box (it never opens another). The tool stays on until another tool is picked.
+- A pen or mouse can draw right up to an answer's edge; only a finger gets the enlarged grab area.
 - **Items** (answers, notes, diagrams, typed text): tap selects (ring + × button), drag moves, × deletes; undo restores. Diagrams move only by the grab strip along the top, so the pen can write on the rest. A dragged answer keeps its spot across re-analysis.
-- Erasing ink near an answer (within ~1.5× its box, min 100 px), or undoing it, removes that answer immediately.
+- Erasing ink near an answer (within ~1.5× its box, min 100 px) removes that answer immediately. Undo only ever undoes the last action: undoing a stroke leaves answers alone.
 
 ### Visual language (Apple-like)
 - Font stack: `-apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif`.

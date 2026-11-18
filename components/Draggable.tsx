@@ -62,6 +62,8 @@ export default function Draggable({
       }}
       onPointerDown={(e) => {
         if (e.pointerType === "mouse" && e.button !== 0) return
+        // The enlarged grab area is for fingers; a pen or mouse is precise, so let it draw there.
+        if (e.pointerType !== "touch" && (e.target as HTMLElement).dataset.pad) return
         e.stopPropagation() // don't start a pen stroke underneath
         ;(e.target as Element).setPointerCapture(e.pointerId)
         grab.current = { sx: e.clientX, sy: e.clientY, ox: x, oy: y, moved: false }
@@ -83,7 +85,7 @@ export default function Draggable({
       onPointerCancel={finish}
     >
       {/* enlarged invisible hit area so small items are still easy to grab */}
-      {!handle && <div className="absolute" style={{ inset: -hit }} />}
+      {!handle && <div className="absolute" data-pad="1" style={{ inset: -hit }} />}
       {selected && (
         <div className="pointer-events-none absolute rounded-xl ring-2 ring-[#007AFF]/60" style={{ inset: -6 }} />
       )}
