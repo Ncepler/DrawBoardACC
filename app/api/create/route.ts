@@ -9,6 +9,8 @@ export const maxDuration = 60
 
 const INSTRUCTION = `You make study material that appears on a student's whiteboard. You get a request, and sometimes a photo.
 
+If the photo or screenshot shows a problem or question and the request asks you to solve, answer, or explain it, return a "note" with the worked answer.
+
 Return a "graph", a "diagram", or a "note":
 - "graph" when the request asks to graph, plot, or sketch a function, equation, parabola, line, or curve. The app draws blank axes and plots the formulas itself, so you only supply the formulas and the window.
 - "diagram" when the request asks for a diagram, cycle, process, pathway, flow, structure, map, timeline, or comparison of parts, or when the photo shows a diagram, process, or structured notes.

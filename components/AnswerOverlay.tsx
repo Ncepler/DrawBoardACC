@@ -6,7 +6,7 @@ import { NOTE_BODY_PX, NOTE_LINE, NOTE_PAD, NOTE_TITLE_PX, NOTE_W, cardSize, not
 import { DARK_SCREEN_COLORS, DIAGRAM_HANDLE, SCREEN_COLORS, diagramSvg, layoutDiagram } from "@/lib/diagram"
 import { GRAPH_COLORS, GRAPH_COLORS_DARK, GRAPH_HANDLE, graphSvg } from "@/lib/graph"
 import { builtinGlyphs, drawRun, measureRun, wrapRun, type GlyphSet } from "@/lib/glyphs"
-import { textWidth, wrapLines } from "@/lib/measure"
+import { HAND_FONT, textWidth, wrapLines } from "@/lib/measure"
 import { richRuns } from "@/lib/rich"
 import { TEXT_LINE, TEXT_PAD, textBoxSize } from "@/lib/texts"
 import type { Answer, Card, TextBox } from "@/lib/types"
@@ -29,8 +29,8 @@ const EXPLAIN_PAD = 12
 const SUP_PX = 0.65 // exponent size relative to the line
 
 /** Width of text with raised exponents (^(…)). */
-const richWidth = (text: string, px: number, weight = 400) =>
-  richRuns(text).reduce((w, r) => w + textWidth(r.t, r.sup ? px * SUP_PX : px, weight), 0)
+const richWidth = (text: string, px: number, weight = 400, font?: string) =>
+  richRuns(text).reduce((w, r) => w + textWidth(r.t, r.sup ? px * SUP_PX : px, weight, font), 0)
 
 /** Text with exponents drawn raised and small. */
 function Rich({ text }: { text: string }) {
@@ -50,24 +50,26 @@ function Rich({ text }: { text: string }) {
 }
 
 /** Font size following the handwriting (height of what was written), capped and fitted to the screen. */
-function answerFontSize(a: Answer, maxW: number) {
+function answerFontSize(a: Answer, maxW: number, font?: string) {
   const ideal = Math.min(MAX_TEXT_PX, Math.max(14, a.box.h / 0.72))
-  const natural = richWidth(a.text, ideal, 500) + ideal * 0.7
+  const natural = richWidth(a.text, ideal, font ? 400 : 500, font) + ideal * 0.7
   const fit = natural > maxW - 8 ? ideal * ((maxW - 8) / natural) : ideal
   return Math.round(Math.max(10, fit))
 }
 
-export const textAnswerRenderer: AnswerRenderer = {
+/** A short answer in a pill. `font` is the system font (typed) or a handwriting-looking one. */
+const makeTextRenderer = (font?: string): AnswerRenderer => ({
   measure(a, maxW) {
-    const fs = answerFontSize(a, maxW)
-    return { w: Math.ceil(richWidth(a.text, fs, 500) + fs * 0.7), h: Math.round(fs * 1.25) }
+    const fs = answerFontSize(a, maxW, font)
+    return { w: Math.ceil(richWidth(a.text, fs, font ? 400 : 500, font) + fs * 0.7), h: Math.round(fs * 1.25) }
   },
   renderAnswer(a, maxW) {
     return (
       <div
-        className="absolute left-0 top-0 whitespace-nowrap font-medium leading-none"
+        className={`absolute left-0 top-0 whitespace-nowrap leading-none ${font ? "" : "font-medium"}`}
         style={{
-          fontSize: answerFontSize(a, maxW),
+          fontSize: answerFontSize(a, maxW, font),
+          fontFamily: font,
           padding: a.text.includes("^") ? "0.3em 0.35em 0.06em" : "0.12em 0.35em",
           borderRadius: "0.3em",
           color: "var(--ai)",
@@ -81,39 +83,49 @@ export const textAnswerRenderer: AnswerRenderer = {
       </div>
     )
   },
-}
+})
+export const textAnswerRenderer = makeTextRenderer()
+const handTextRenderer = makeTextRenderer(HAND_FONT)
 
-/** Explanations: a few sentences, wrapped in a small card. */
+/** Explanations: a few sentences, wrapped in a small card. Typed by default; `hand` uses a handwriting-looking font. */
 const explainWidth = (maxW: number) => Math.min(320, maxW)
-export const explainAnswerRenderer: AnswerRenderer = {
-  measure(a, maxW) {
-    const w = explainWidth(maxW)
-    const lines = wrapLines(a.text, EXPLAIN_PX, w - 2 * EXPLAIN_PAD).length
-    return { w, h: lines * EXPLAIN_LINE + 2 * EXPLAIN_PAD }
-  },
-  renderAnswer(a, maxW) {
-    const w = explainWidth(maxW)
-    return (
-      <div
-        className="absolute left-0 top-0 rounded-2xl"
-        style={{
-          width: w,
-          padding: EXPLAIN_PAD,
-          fontSize: EXPLAIN_PX,
-          lineHeight: `${EXPLAIN_LINE}px`,
-          color: "var(--ai-text)",
-          background: "var(--surface)",
-          boxShadow: "0 0 0 0.5px var(--ai-ring), 0 2px 10px rgba(0,0,0,0.08)",
-          opacity: a.confidence === "low" ? 0.6 : 1,
-        }}
-      >
-        {wrapLines(a.text, EXPLAIN_PX, w - 2 * EXPLAIN_PAD).map((l, i) => (
-          <div key={i}>{l}</div>
-        ))}
-      </div>
-    )
-  },
+const makeExplainRenderer = (hand: boolean): AnswerRenderer => {
+  const px = hand ? 18 : EXPLAIN_PX
+  const line = hand ? 24 : EXPLAIN_LINE
+  const font = hand ? HAND_FONT : undefined
+  return {
+    measure(a, maxW) {
+      const w = explainWidth(maxW)
+      const lines = wrapLines(a.text, px, w - 2 * EXPLAIN_PAD, 400, font).length
+      return { w, h: lines * line + 2 * EXPLAIN_PAD }
+    },
+    renderAnswer(a, maxW) {
+      const w = explainWidth(maxW)
+      return (
+        <div
+          className="absolute left-0 top-0 rounded-2xl"
+          style={{
+            width: w,
+            padding: EXPLAIN_PAD,
+            fontSize: px,
+            fontFamily: font,
+            lineHeight: `${line}px`,
+            color: "var(--ai-text)",
+            background: "var(--surface)",
+            boxShadow: "0 0 0 0.5px var(--ai-ring), 0 2px 10px rgba(0,0,0,0.08)",
+            opacity: a.confidence === "low" ? 0.6 : 1,
+          }}
+        >
+          {wrapLines(a.text, px, w - 2 * EXPLAIN_PAD, 400, font).map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+        </div>
+      )
+    },
+  }
 }
+export const explainAnswerRenderer = makeExplainRenderer(false)
+const handExplainRenderer = makeExplainRenderer(true)
 
 type InkLayout = { gh: number; pad: number; lines: string[]; w: number; h: number }
 const LINE_GAP = 1.45 // line height in glyph heights
@@ -186,21 +198,29 @@ export function makeInkRenderer(set: GlyphSet, color: string): AnswerRenderer {
   }
 }
 
+/** How an answer is shown: "text" (typed), "hand" (handwriting) or "auto" (strokes for math, handwriting-looking text otherwise). */
+export function answerMode(a: Answer, handwritingOn: boolean): "text" | "hand" | "auto" {
+  return a.style ?? (a.kind === "explain" ? "text" : handwritingOn ? "hand" : "auto")
+}
+
 /**
- * Handwriting on: every answer is drawn in the user's handwriting (explanations
- * wrap; characters they haven't written are typeset). Off: math is drawn with the
- * built-in strokes, explanations get a card, everything else a text pill.
+ * Default look: explanations are a typed card; math is drawn as pen strokes; other answers are text in a
+ * handwriting-looking font; with "my handwriting" on, short answers are drawn with the user's glyphs.
+ * The per-answer toggle (`style`) overrides this: "hand" uses the user's glyphs if they made any
+ * (otherwise a handwriting-looking font), "text" is plain typed text.
  */
-export function makeDefaultRenderer(set: GlyphSet, color: string, handwriting = false): AnswerRenderer {
+export function makeDefaultRenderer(set: GlyphSet, color: string, handwriting = false, mine: GlyphSet | null = null): AnswerRenderer {
   const ink = makeInkRenderer(set, color)
-  const pick = (a: Answer): AnswerRenderer =>
-    handwriting
-      ? ink
-      : a.kind === "explain"
-        ? explainAnswerRenderer
-        : measureRun(a.text, set) !== null
-          ? ink
-          : textAnswerRenderer
+  const mineInk = mine ? makeInkRenderer(mine, color) : null
+  const pick = (a: Answer): AnswerRenderer => {
+    const mode = answerMode(a, handwriting)
+    if (mode === "text") return a.kind === "explain" ? explainAnswerRenderer : textAnswerRenderer
+    if (mode === "hand") {
+      if (handwriting) return ink
+      return mineInk ?? (a.kind === "explain" ? handExplainRenderer : handTextRenderer)
+    }
+    return a.kind === "explain" ? explainAnswerRenderer : measureRun(a.text, set) !== null ? ink : handTextRenderer
+  }
   return {
     measure: (a, maxW) => pick(a).measure(a, maxW),
     renderAnswer: (a, maxW) => pick(a).renderAnswer(a, maxW),
@@ -333,6 +353,8 @@ export default function AnswerOverlay({
   aiColor = "#007AFF",
   dark = false,
   handwriting = false,
+  mineGlyphs = null,
+  onToggleStyle,
 }: {
   answers: Answer[]
   cards: Card[]
@@ -354,8 +376,10 @@ export default function AnswerOverlay({
   aiColor?: string
   dark?: boolean
   handwriting?: boolean
+  mineGlyphs?: GlyphSet | null
+  onToggleStyle: (id: string) => void
 }) {
-  const renderer = makeDefaultRenderer(glyphs, aiColor, handwriting)
+  const renderer = makeDefaultRenderer(glyphs, aiColor, handwriting, mineGlyphs)
   const positions = placeAnswers(answers, cards, width - 16, renderer)
   const maxW = width - 16
   return (
@@ -408,9 +432,32 @@ export default function AnswerOverlay({
             h={r.h}
             scale={scale}
             selected={sel}
+            keepSize
             onSelect={() => onSelect(sel ? null : { type: "answer", id: a.id })}
             onMove={(x, y) => onMoveAnswer(a.id, x, y)}
             onDelete={() => onDelete({ type: "answer", id: a.id })}
+            actions={
+              <button
+                type="button"
+                aria-label={answerMode(a, handwriting) === "text" ? "Show in handwriting" : "Show as typed text"}
+                title={answerMode(a, handwriting) === "text" ? "Show in handwriting" : "Show as typed text"}
+                className="flex h-11 w-11 items-center justify-center [touch-action:manipulation]"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleStyle(a.id)
+                }}
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#007AFF] text-white shadow">
+                  {answerMode(a, handwriting) === "text" ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 20l4.5-1 10-10a2.1 2.1 0 00-3-3l-10 10L4 20z" />
+                    </svg>
+                  ) : (
+                    <span className="text-[12px] font-semibold leading-none">Aa</span>
+                  )}
+                </span>
+              </button>
+            }
           >
             {renderer.renderAnswer(a, maxW)}
           </Draggable>
@@ -429,6 +476,7 @@ export default function AnswerOverlay({
             h={h}
             scale={scale}
             selected={sel}
+            keepSize
             // tap a selected box (or any box with the Text tool) to edit it
             onSelect={() => (sel || textTool ? onEditText(t.id) : onSelect({ type: "text", id: t.id }))}
             onMove={(x, y) => onMoveText(t.id, x, y)}

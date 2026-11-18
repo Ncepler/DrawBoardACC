@@ -13,11 +13,13 @@ export default function Draggable({
   w,
   h,
   scale = 1,
+  keepSize = false,
   selected,
   onSelect,
   onMove,
   onDelete,
   handle,
+  actions,
   children,
 }: {
   x: number
@@ -26,19 +28,25 @@ export default function Draggable({
   h: number
   /** Board zoom (screen px per board px): pointer movement is divided by it, and tap targets stay 44 screen px. */
   scale?: number
+  /** When zoomed out, draw the item at its 100% size instead of shrinking it (positions still follow the zoom). */
+  keepSize?: boolean
   selected: boolean
   onSelect: () => void
   onMove: (x: number, y: number) => void
   onDelete: () => void
   /** If set, only a strip this tall along the top grabs the item; the rest lets the pen draw through. */
   handle?: number
+  /** Shown at the top-left corner while selected (for example the typed/handwriting toggle). */
+  actions?: ReactNode
   children: ReactNode
 }) {
   const grab = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null)
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
   const left = drag?.x ?? x
   const top = drag?.y ?? y
-  const hit = Math.max(8, (44 - Math.min(w, h) * scale) / 2) / scale
+  const f = keepSize && scale < 1 ? 1 / scale : 1 // content scale that cancels the zoom-out
+  const es = scale * f // screen px per content px
+  const hit = Math.max(8, (44 - Math.min(w, h) * es) / 2) / es
 
   const finish = (e: React.PointerEvent) => {
     e.stopPropagation()
@@ -58,6 +66,8 @@ export default function Draggable({
         width: w,
         height: h,
         cursor: drag ? "grabbing" : "grab",
+        transform: f === 1 ? undefined : `scale(${f})`,
+        transformOrigin: "0 0",
         filter: drag ? "drop-shadow(0 6px 14px rgba(0,0,0,0.18))" : undefined,
         zIndex: drag || selected ? 5 : undefined,
       }}
@@ -85,16 +95,26 @@ export default function Draggable({
       {/* enlarged invisible hit area so small items are still easy to grab */}
       {!handle && <div className="absolute" data-pad="1" style={{ inset: -hit }} />}
       {selected && (
-        <div className="pointer-events-none absolute rounded-xl ring-2 ring-[#007AFF]/60" style={{ inset: -6 / scale }} />
+        <div className="pointer-events-none absolute rounded-xl ring-2 ring-[#007AFF]/60" style={{ inset: -6 / es }} />
       )}
       <div className={handle ? "pointer-events-none" : undefined}>{children}</div>
       {handle ? (
         <div
           className="pointer-events-auto absolute inset-x-0 top-0 flex justify-center rounded-t-xl"
-          style={{ height: Math.max(28 / scale, handle) }}
+          style={{ height: Math.max(28 / es, handle) }}
           aria-label="Drag to move"
         >
           <span className="mt-1.5 h-1.5 w-10 rounded-full bg-[#007AFF]/30" />
+        </div>
+      ) : null}
+      {selected && actions ? (
+        <div
+          className="pointer-events-auto absolute flex h-11 w-11 items-center justify-center [touch-action:manipulation]"
+          style={{ left: -26, top: -26, transform: `scale(${1 / es})` }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+        >
+          {actions}
         </div>
       ) : null}
       {selected && (
@@ -102,7 +122,7 @@ export default function Draggable({
           type="button"
           aria-label="Delete"
           className="pointer-events-auto absolute flex h-11 w-11 items-center justify-center [touch-action:manipulation]"
-          style={{ right: -26, top: -26, transform: `scale(${1 / scale})` }}
+          style={{ right: -26, top: -26, transform: `scale(${1 / es})` }}
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
           onClick={(e) => {

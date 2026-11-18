@@ -1,6 +1,6 @@
 "use client"
 
-export type Tool = "pen" | "eraser" | "text" | "ask"
+export type Tool = "pen" | "eraser" | "text" | "ask" | "hand"
 
 const btn =
   "flex h-11 w-11 items-center justify-center rounded-full transition-colors duration-150 [touch-action:manipulation] disabled:opacity-30"
@@ -56,6 +56,11 @@ export default function Toolbar({
         <svg {...icon}>
           <path d="M9 19h10" />
           <path d="M5.5 15.5l8.8-8.8a2 2 0 012.8 0l1.2 1.2a2 2 0 010 2.8L11 19H8l-2.5-2.5a1.4 1.4 0 010-1z" />
+        </svg>
+      </button>
+      <button type="button" aria-label="Move board" title="Drag to move around the board" aria-pressed={tool === "hand"} className={`${btn} ${tool === "hand" ? active : idle}`} onClick={() => onTool(tool === "hand" ? "pen" : "hand")}>
+        <svg {...icon}>
+          <path d="M8 12V6.5a1.5 1.5 0 013 0V11m0-1V5a1.5 1.5 0 013 0v6m0-3.5a1.5 1.5 0 013 0V15a6 6 0 01-6 6h-.5a6 6 0 01-4.7-2.3L4.5 15.7a1.6 1.6 0 012.4-2L8 15" />
         </svg>
       </button>
       <button type="button" aria-label="Undo" disabled={!canUndo} className={`${btn} ${idle}`} onClick={onUndo}>

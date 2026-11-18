@@ -84,11 +84,12 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 ### In scope (built)
 - Full-screen whiteboard canvas with Apple-feel ink using Apple Pencil, finger, or mouse.
 - Left sidebar with boards (Board 1, Board 2, ...), add-board button, Demos link, show/hide toggle.
-- Floating toolbar: pen, eraser, undo, clear board (undoable) | Text (T), Ask, Photo | Analyze.
+- Floating toolbar: pen, eraser, Move (hand), undo, clear board (undoable) | Text (T), Ask, Photo | Analyze.
 - Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause".
-- Unbounded board with zoom and pan: +, −, and a reset button (shows the zoom %) under the settings gear; two-finger drag pans and pinch zooms; scroll pans, Ctrl/Cmd+scroll or a trackpad pinch zooms; Space + mouse drag pans. Zoom runs 2%–400%. Each board remembers its own view in memory (not saved across refresh).
+- Unbounded board with zoom and pan: +, −, and a reset button (shows the zoom %) under the settings gear; two-finger drag pans and pinch zooms; scroll pans, Ctrl/Cmd+scroll or a trackpad pinch zooms; Space + mouse drag pans. Zoom runs 2%–400%. Each board remembers its own view in memory (not saved across refresh). Zoomed out, typed text, answers and line thickness keep their 100% size (only their positions follow the zoom); diagrams, notes and graphs shrink with the board so ink drawn on them stays aligned.
 - Handwriting setup: each box shows a faint gray guide letter to trace (readable in light and dark), and an Undo button in the header undoes the last stroke across all characters.
 - Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
+- Paste an image (Cmd/Ctrl+V) or drop one on the board: opens the same box as Photo (default request "Turn this into a diagram"; edit it to e.g. "solve this").
 - Ask box and Photo → AI notes, diagrams (cycle / flow / tree layouts, optional numbered practice blanks) and function graphs (blank axes drawn by the app, curves plotted from formulas). "graph it" written on the board makes a graph too.
 - Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".
 - Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable.
@@ -109,7 +110,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 | No question mark required: Gemini decides what to respond to | Noah's request; a "?" still works |
 | Answer kinds with caps: math ≤10 words, term ≤6 words, explain ≤60 words (2–3 sentences), check ≤8 words; enforced in the Gemini instruction AND in code | Short where it must fit beside the work; explanations when asked ("Krebs cycle:?", "Explain X") |
 | Math answers are plain text, never LaTeX; "=" is added when the student didn't write one. Exponents that aren't simple digits are written `^(…)` and drawn raised and small (`3^(π/2)`) | Raw `\frac{}` was showing; "2500+10" should read "= 2510"; a literal caret looked wrong |
-| Handwriting off: numbers/simple math drawn as pen strokes, other answers as text, explanations as a card. Handwriting on: every answer drawn in the user's handwriting | Noah's request ("drawn on", "answer in my own handwriting") |
+| Default answer look: explanations are a typed card; math is drawn as pen strokes; other answers are text in a handwriting-looking system font (`HAND_FONT`: Bradley Hand / Noteworthy / Segoe Print). "Write answers in my handwriting" on: short answers are drawn in the user's glyphs, explanations stay a typed card. Every answer has a toggle (when selected, top-left button) between typed and handwriting (the user's glyphs if made, else the handwriting-looking font) | Noah's request: explanations in a textbox by default, handwriting-looking default |
 | Handwriting: user writes each character once in Settings; glyphs behind a `GlyphSet` interface | Phase 2 starting point; renderer swappable |
 | Gemini analyzes a screenshot of the board | Noah's choice of model provider |
 | Drawing must feel like Apple's ink (Notes/Freeform) | Pen feel is a top priority |
@@ -142,7 +143,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Canvas fills the viewport (`position: fixed; inset: 0`; safe-area insets on all floating chrome). Board color and ink color follow the theme.
 - Top left: sidebar toggle (always reachable) and the translucent boards sidebar (boards, Add board, Demos). The sidebar floats over the canvas, so toggling never resizes the canvas.
 - Top right: settings gear → settings panel (appearance, handwriting, auto-analyze, demos). Zoom controls sit in a small vertical pill just under it.
-- Bottom center toolbar: pen, eraser (whole-stroke), undo, clear board (one Undo restores it) | Text (T), Ask, Photo | Analyze. Nothing else.
+- Bottom center toolbar: pen, eraser (whole-stroke), Move (hand: drag the board with any pointer), undo, clear board (one Undo restores it) | Text (T), Ask, Photo | Analyze. Nothing else.
 - Small notices appear top center (e.g. "Nothing to answer found", "Couldn't analyze: …", "2 of 3 right").
 - All tap targets at least 44px. No hover-only UI, no right-click, nothing that only works with a mouse (keyboard shortcuts are extras: Enter = Analyze, Delete = delete selection, Escape = deselect).
 
@@ -204,6 +205,7 @@ type Stroke = { id; points: Point[]; tool: "pen"; width; color; real: boolean /*
 
 type AnswerKind = "math" | "term" | "explain" | "check"
 type Answer = {
+  style?: "text" | "hand"       // per-answer toggle; overrides the default look
   id; box: { x; y; w; h }      // board coords of what it answers (from Gemini's normalized box)
   text; kind?: AnswerKind; confidence: "high" | "low"
   source?: string              // Gemini's transcription; unchanged source => keep old answer on re-analysis
@@ -274,10 +276,10 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 - Answer placement: to the right of the answered box, then below, left, above; avoiding other answers and cards (the board is unbounded, so there is no screen edge). Text size follows the height of what was written, capped (text ≤44 px, drawn ≤110 px) and shrunk to fit the screen width at 100% zoom, so zooming never re-flows answers.
 - Renderers sit behind `AnswerRenderer { measure(answer, maxW); renderAnswer(answer, maxW) }`: ink (glyphs), text pill, explain card. `makeDefaultRenderer(glyphSet, color, handwriting)` picks one per answer.
 - Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × ÷ / ( ) . x y`, a space, and superscripts. `lib/rich.ts` parses `^(…)` exponents; both renderers draw them smaller and raised.
-- With "Write answers in my handwriting" on and at least one glyph set up, EVERY answer (explanations included) is drawn with the user's glyphs. Long answers wrap onto several lines.
+- With "Write answers in my handwriting" on and at least one glyph set up, every answer except explanations is drawn with the user's glyphs (explanations stay a typed card until toggled). Long answers wrap onto several lines.
   - Sub/superscript digits are drawn with the user's own digits, scaled and shifted.
   - A character the user hasn't written is typeset in a plain font at the same size, so one missing glyph never drops the whole answer to text.
-- With handwriting off, only fully-glyphed math is drawn; explanations show as a card and everything else as a text pill.
+- With handwriting off, only fully-glyphed math is drawn as strokes; explanations show as a typed card and everything else as a text pill in the handwriting-looking font.
 
 ---
 
