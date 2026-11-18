@@ -10,11 +10,15 @@ export default function Toolbar({
   onTool,
   canUndo,
   onUndo,
+  busy,
+  onAnalyze,
 }: {
   tool: Tool
   onTool: (t: Tool) => void
   canUndo: boolean
   onUndo: () => void
+  busy: boolean
+  onAnalyze: () => void
 }) {
   const active = "bg-[#007AFF] text-white"
   const idle = "text-[#1d1d1f] active:bg-black/10"
@@ -54,6 +58,15 @@ export default function Toolbar({
           <path d="M9 14L4 9l5-5" />
           <path d="M4 9h10a6 6 0 010 12h-3" />
         </svg>
+      </button>
+      <div className="mx-0.5 h-6 w-px bg-black/10" />
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onAnalyze}
+        className="flex h-11 items-center rounded-full bg-[#007AFF] px-4 text-[15px] font-medium text-white transition-opacity [touch-action:manipulation] active:opacity-80 disabled:opacity-60"
+      >
+        {busy ? "Analyzing…" : "Analyze"}
       </button>
     </div>
   )
