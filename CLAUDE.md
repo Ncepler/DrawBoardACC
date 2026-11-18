@@ -89,7 +89,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Unbounded board with zoom and pan: +, −, and a reset button (shows the zoom %) under the settings gear; two-finger drag pans and pinch zooms; scroll pans, Ctrl/Cmd+scroll or a trackpad pinch zooms; Space + mouse drag pans. Zoom runs 2%–400%. Each board remembers its own view in memory (not saved across refresh).
 - Handwriting setup: each box shows a faint gray guide letter to trace (readable in light and dark), and an Undo button in the header undoes the last stroke across all characters.
 - Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
-- Ask box and Photo → AI notes and diagrams (cycle / flow / tree layouts, optional numbered practice blanks).
+- Ask box and Photo → AI notes, diagrams (cycle / flow / tree layouts, optional numbered practice blanks) and function graphs (blank axes drawn by the app, curves plotted from formulas). "graph it" written on the board makes a graph too.
 - Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".
 - Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable.
 - `/demo` page with ready-made demo boards.
@@ -213,7 +213,8 @@ type Answer = {
 
 type DiagramNode = { id; label; blank?: number; fill?: string; result?: "right" | "wrong" }
 type Diagram = { title; layout: "cycle" | "flow" | "tree"; nodes: DiagramNode[]; edges: { from; to; label? }[] }
-type Card = { id; pos; scale; prompt?; createdAt } & ({ type: "diagram"; diagram } | { type: "note"; title; text })
+type Graph = { title; xmin; xmax; ymin; ymax; curves: { expr; label? }[]; points: { x; curve; label? }[] }
+type Card = { id; pos; scale; prompt?; source?; createdAt } & ({ type: "diagram"; diagram } | { type: "note"; title; text } | { type: "graph"; graph })
 type TextBox = { id; pos; text; size; createdAt }   // typed by the student (Text tool)
 
 type Board = { id; name; strokes; answers; cards?; texts?; inkVersion; lastAnalyzedVersion; updatedAt }
@@ -252,7 +253,8 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 - `lib/format.ts` post-processing: LaTeX/markdown → plain text with super/subscripts (x², CO₂); per-kind word caps; for math, strip a leading "=" and add "= " when the student wrote no "=".
 
 ### `POST /api/create`
-- Input: `{ prompt?, image? }` (JPEG or PNG base64). Output: `{ card: { type: "note", title, text } | { type: "diagram", diagram } }`.
+- Input: `{ prompt?, image? }` (JPEG or PNG base64). Output: `{ card: { type: "note", title, text } | { type: "diagram", diagram } | { type: "graph", graph } }`.
+- Graphs: Gemini supplies only formulas in x (`x^2 - 4`, up to 3 curves), the window, and key points (x plus which curve; the app computes y). `lib/graph.ts` parses and plots them with its own small parser (no `eval`); unreadable formulas are dropped, never guessed. Blank axes, grid and ticks are drawn by the app. Graph cards move by a grab strip along the top, like diagrams, and are not part of the image sent to Gemini.
 - Diagrams: 3–14 nodes, short labels, layout cycle/flow/tree. `blank` numbers only when the student asks for blanks/practice; the blank's correct answer stays in `label` (hidden on screen and in the image sent to Gemini). Layout and SVG rendering are done client-side (`lib/diagram.ts`).
 
 ### Correctness rules
@@ -369,7 +371,7 @@ If it passes: build the live practice mode and handwriting output next. Hardware
 - **Overlay:** AI answers, AI notes/diagrams, typed text, and editors drawn above the ink. AI items are never sent to Gemini as answers.
 - **Analysis pass:** one Analyze (or idle-triggered) round trip to `/api/answer`.
 - **Answer kind:** math, term, explain, or check. Each kind has its own length cap and renderer. A fifth item kind, create, isn't an answer: it makes a card.
-- **Card:** an AI note or diagram created via Ask or Photo.
+- **Card:** an AI note, diagram or graph created via Ask, Photo or a written command.
 - **Practice blank:** a numbered empty box in a diagram whose answer the student fills in.
 - **Glyph set:** the stroke shapes used to draw answers (built-in, or the user's own handwriting).
 - **Low confidence:** Gemini unsure; shown muted so the user doesn't trust it blindly.

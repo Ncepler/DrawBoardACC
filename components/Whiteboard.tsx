@@ -13,7 +13,7 @@ import { boxToBoard, exportBoardPng, mergeAnswers, pruneAnswers } from "@/lib/an
 import { cardSize, fitScale, naturalSize } from "@/lib/cards"
 import { isCorrect } from "@/lib/check"
 import { BLANK_H, BLANK_W, layoutDiagram } from "@/lib/diagram"
-import { TEXT_PAD, TEXT_SIZE } from "@/lib/texts"
+import { TEXT_PAD, TEXT_SIZE, textBoxSize } from "@/lib/texts"
 import { ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
 import { DEMOS, inkFromText } from "@/lib/demos"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
@@ -81,6 +81,7 @@ function freeSpot(at: { x: number; y: number }, w: number, h: number, vis: Rect,
   const taken = [
     ...(board?.cards ?? []).map((c) => ({ x: c.pos.x, y: c.pos.y, ...cardSize(c) })),
     ...(board?.answers ?? []).map((a) => (a.pos ? { ...a.box, x: a.pos.x, y: a.pos.y } : a.box)),
+    ...(board?.texts ?? []).map((t) => ({ x: t.pos.x, y: t.pos.y, ...textBoxSize(t) })),
   ]
   const free = (x: number, y: number) =>
     !taken.some((r) => x < r.x + r.w + 12 && x + w + 12 > r.x && y < r.y + r.h + 12 && y + h + 12 > r.y)

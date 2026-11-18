@@ -39,6 +39,17 @@ export type Diagram = {
   edges: DiagramEdge[]
 }
 
+/** A function graph: blank axes plus curves from formulas in x. Points sit on a curve (by index) at the given x. */
+export type Graph = {
+  title: string
+  xmin: number
+  xmax: number
+  ymin: number
+  ymax: number
+  curves: { expr: string; label?: string }[]
+  points: { x: number; curve: number; label?: string }[]
+}
+
 /** Things the AI creates on request (Ask box / photo). Live on the overlay, draggable and deletable. */
 export type Card = {
   id: string
@@ -47,7 +58,7 @@ export type Card = {
   prompt?: string
   source?: string // the model's reading of the written command that made this card (avoids making it twice)
   createdAt: number
-} & ({ type: "diagram"; diagram: Diagram } | { type: "note"; title: string; text: string })
+} & ({ type: "diagram"; diagram: Diagram } | { type: "note"; title: string; text: string } | { type: "graph"; graph: Graph })
 
 /** Text the student typed on the board (Text tool). Counts as their own writing for Analyze. */
 export type TextBox = { id: string; pos: { x: number; y: number }; text: string; size: number; createdAt: number }
@@ -83,3 +94,4 @@ export type AnswerItem = {
 export type CardPayload =
   | { type: "diagram"; diagram: Diagram }
   | { type: "note"; title: string; text: string }
+  | { type: "graph"; graph: Graph }

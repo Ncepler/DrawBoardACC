@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react"
 import Draggable from "./Draggable"
 import { NOTE_BODY_PX, NOTE_LINE, NOTE_PAD, NOTE_TITLE_PX, NOTE_W, cardSize, noteLines } from "@/lib/cards"
 import { DARK_SCREEN_COLORS, DIAGRAM_HANDLE, SCREEN_COLORS, diagramSvg, layoutDiagram } from "@/lib/diagram"
+import { GRAPH_COLORS, GRAPH_COLORS_DARK, GRAPH_HANDLE, graphSvg } from "@/lib/graph"
 import { builtinGlyphs, drawRun, measureRun, wrapRun, type GlyphSet } from "@/lib/glyphs"
 import { textWidth, wrapLines } from "@/lib/measure"
 import { richRuns } from "@/lib/rich"
@@ -283,6 +284,20 @@ function DiagramCard({ card, dark }: { card: Extract<Card, { type: "diagram" }>;
   )
 }
 
+function GraphCard({ card, dark }: { card: Extract<Card, { type: "graph" }>; dark: boolean }) {
+  const { w, h } = cardSize(card)
+  return (
+    <div
+      className="absolute left-0 top-0 origin-top-left"
+      style={{ width: w, height: h }}
+      // Transparent so the student's ink on the graph stays visible. Text is escaped in graphSvg.
+      dangerouslySetInnerHTML={{
+        __html: graphSvg(card.graph, dark ? GRAPH_COLORS_DARK : GRAPH_COLORS).replace("<svg ", `<svg style="width:${w}px;height:${h}px" `),
+      }}
+    />
+  )
+}
+
 export type Selection = { type: "answer" | "card" | "text"; id: string } | null
 
 /** Text the student typed: same color as their ink, not AI blue. */
@@ -360,9 +375,9 @@ export default function AnswerOverlay({
             onSelect={() => onSelect(sel ? null : { type: "card", id: c.id })}
             onMove={(x, y) => onMoveCard(c.id, x, y)}
             onDelete={() => onDelete({ type: "card", id: c.id })}
-            handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : undefined}
+            handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : c.type === "graph" ? GRAPH_HANDLE * c.scale : undefined}
           >
-            {c.type === "note" ? <NoteCard card={c} /> : <DiagramCard card={c} dark={dark} />}
+            {c.type === "note" ? <NoteCard card={c} /> : c.type === "graph" ? <GraphCard card={c} dark={dark} /> : <DiagramCard card={c} dark={dark} />}
             {c.type === "diagram" && c.diagram.nodes.some((n) => n.blank && n.fill) && (
               <button
                 type="button"

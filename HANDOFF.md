@@ -18,10 +18,11 @@ Snapshot for the next Claude Code session. CLAUDE.md is the spec; this file is w
 ## What the app does now
 
 See CLAUDE.md §0–§13. In short:
-- **Answering:** Analyze reads the whole board (no "?" needed). Answers come back as math, term, explain or check, drawn or shown next to what they answer.
-- **Making things:** Ask box and Photo produce notes or diagrams. Practice blanks can be filled by pen or by typing, and "Check answers" checks the typed ones.
-- **Tools:** the Text tool types on the board. Items can be selected, dragged, deleted and undone.
-- **Settings:** light/dark, your-own-handwriting glyphs, auto-analyze.
+- **Answering:** Analyze reads the whole board (no "?" needed), including its own earlier answers (drawn blue in the image). New answers are added, never replaced, so "÷ 2" under a 6 becomes its own answer. Commands work too: text commands come back as answers, "write out a diagram…" / "graph it" make a card.
+- **Making things:** Ask box and Photo produce notes, diagrams or function graphs (`lib/graph.ts`: formulas plotted on app-drawn axes). Practice blanks can be filled by pen or by typing, and "Check answers" checks the typed ones.
+- **Tools:** the Text tool types on the board (click-out saves, box grows). Clear board button (undoable). Items can be selected, dragged, deleted and undone; undoing a stroke leaves answers alone.
+- **Board:** unbounded with zoom/pan (2%–400%): +/−/reset under the gear, pinch and two-finger pan, scroll to pan, Ctrl/Cmd+scroll to zoom, Space+drag. View is per board, in memory only.
+- **Settings:** light/dark, your-own-handwriting glyphs (letters, numbers, a "More symbols" tab, gray guide letters, undo), auto-analyze. Answers show exponents `^(…)` raised.
 - **Demos:** the `/demo` page.
 
 ## Testing (what works in the container)
@@ -47,6 +48,8 @@ See CLAUDE.md §0–§13. In short:
 ## Open items / known issues
 
 - **Untested on iPad:**
+  - Two-finger pan and pinch zoom (only mouse/wheel/buttons were tested)
+  - Zoom redraw speed on a board with thousands of strokes
   - Pencil feel, palm rejection, and hover
   - the Ask/Text keyboard opening on tap (`flushSync` + `autoFocus` on pointer lift)
   - camera photo upload
@@ -77,6 +80,8 @@ See CLAUDE.md §0–§13. In short:
 | `components/Toolbar.tsx`, `components/Sidebar.tsx` | Toolbar and boards sidebar |
 | `lib/gemini.ts`, `lib/server.ts` | Server-only: Gemini calls, model fallback, origin/rate/body guards |
 | `lib/format.ts` | LaTeX→plain, "=" rule, per-kind caps |
+| `lib/graph.ts` | Safe formula parser and SVG for graph cards (axes, curves, points) |
+| `lib/rich.ts` | Parses `^(…)` exponents for the ink and text renderers |
 | `lib/analysis.ts` | Board→PNG export (ink, typed text, gray practice diagrams), answer merging/pruning |
 | `lib/diagram.ts`, `lib/cards.ts` | Diagram layout and SVG; card sizing |
 | `lib/glyphs.ts`, `lib/settings.ts` | Glyph sets and drawing; settings and user glyph storage |
