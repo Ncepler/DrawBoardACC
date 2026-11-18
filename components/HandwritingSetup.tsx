@@ -10,6 +10,7 @@ const SETS = [
   { id: "num", label: "Numbers & symbols", chars: [..."0123456789+-=×/().,?!%"] },
   { id: "lower", label: "Lowercase", chars: [..."abcdefghijklmnopqrstuvwxyz"] },
   { id: "upper", label: "Uppercase", chars: [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"] },
+  { id: "sym", label: "More symbols", chars: [..."÷π√^<>≤≥≠≈±°∞Δθ→:;'\"[]{}*_&"] },
 ]
 export const HANDWRITING_CHAR_COUNT = SETS.reduce((n, s) => n + s.chars.length, 0)
 

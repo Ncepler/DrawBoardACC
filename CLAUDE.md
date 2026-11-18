@@ -47,7 +47,7 @@ Noah's own priority order is software first. Hardware is far-future and depends 
 
 Phases and where they stand:
 1. Mockup loop: answers on the board, boards, Apple-feel ink. **Built.**
-2. Answers in the user's own handwriting. **Started:** per-character handwriting capture in Settings (74 characters); with the setting on, every answer is drawn with those glyphs, and any missing character is typeset. Not yet: connected cursive, natural spacing/jitter, multiple samples per character, learning from normal writing.
+2. Answers in the user's own handwriting. **Started:** per-character handwriting capture in Settings (about 100 characters: letters, numbers, and a "More symbols" tab with π √ ^ ÷ ≤ ≥ and more); with the setting on, every answer is drawn with those glyphs, and any missing character is typeset. Not yet: connected cursive, natural spacing/jitter, multiple samples per character, learning from normal writing.
 3. Practice mode: diagrams with blanks, the user fills them in, the app checks them. **Built (first version):** Ask for "… with N blanks"; fill by pen (checked by Gemini via Analyze) or by typing (checked locally by "Check answers").
 4. Photo of a real whiteboard / textbook figure. **Built (first version):** Photo button → diagram or note.
 5. Possibly: iPad-optimized app, then hardware.
@@ -106,7 +106,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 | Analysis is manual (Analyze button / Enter); auto-on-pause is an opt-in setting, default off | Saves Gemini quota; Noah asked for a button |
 | No question mark required: Gemini decides what to respond to | Noah's request; a "?" still works |
 | Answer kinds with caps: math ≤10 words, term ≤6 words, explain ≤60 words (2–3 sentences), check ≤8 words; enforced in the Gemini instruction AND in code | Short where it must fit beside the work; explanations when asked ("Krebs cycle:?", "Explain X") |
-| Math answers are plain text, never LaTeX; "=" is added when the student didn't write one | Raw `\frac{}` was showing; "2500+10" should read "= 2510" |
+| Math answers are plain text, never LaTeX; "=" is added when the student didn't write one. Exponents that aren't simple digits are written `^(…)` and drawn raised and small (`3^(π/2)`) | Raw `\frac{}` was showing; "2500+10" should read "= 2510"; a literal caret looked wrong |
 | Handwriting off: numbers/simple math drawn as pen strokes, other answers as text, explanations as a card. Handwriting on: every answer drawn in the user's handwriting | Noah's request ("drawn on", "answer in my own handwriting") |
 | Handwriting: user writes each character once in Settings; glyphs behind a `GlyphSet` interface | Phase 2 starting point; renderer swappable |
 | Gemini analyzes a screenshot of the board | Noah's choice of model provider |
@@ -268,7 +268,7 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 - One DOM overlay above the ink canvases holds answers, AI cards, typed text, editors and the Ask box. It is never part of the image sent to Gemini (practice diagrams are re-rendered in gray for the export).
 - Answer placement: to the right of the answered box, then below, left, above; on-screen; avoiding other answers and cards. Text size follows the height of what was written, capped (text ≤44 px, drawn ≤110 px) and shrunk to fit the screen width.
 - Renderers sit behind `AnswerRenderer { measure(answer, maxW); renderAnswer(answer, maxW) }`: ink (glyphs), text pill, explain card. `makeDefaultRenderer(glyphSet, color, handwriting)` picks one per answer.
-- Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × / ( ) . x y`, a space, and superscripts.
+- Glyphs: `GlyphSet { get(ch) }`. The built-in set covers digits, `= + - × ÷ / ( ) . x y`, a space, and superscripts. `lib/rich.ts` parses `^(…)` exponents; both renderers draw them smaller and raised.
 - With "Write answers in my handwriting" on and at least one glyph set up, EVERY answer (explanations included) is drawn with the user's glyphs. Long answers wrap onto several lines.
   - Sub/superscript digits are drawn with the user's own digits, scaled and shifted.
   - A character the user hasn't written is typeset in a plain font at the same size, so one missing glyph never drops the whole answer to text.
