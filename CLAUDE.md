@@ -86,6 +86,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Left sidebar with boards (Board 1, Board 2, ...), add-board button, Demos link, show/hide toggle.
 - Floating toolbar: pen, eraser, undo, clear board (undoable) | Text (T), Ask, Photo | Analyze.
 - Settings gear (top right): appearance (System / Light / Dark), "Write answers in my handwriting" + handwriting setup, "Analyze automatically when I pause".
+- Handwriting setup: each box shows a faint gray guide letter to trace (readable in light and dark), and an Undo button in the header undoes the last stroke across all characters.
 - Analyze: board image → Gemini → answers by kind, drawn or shown next to what they answer.
 - Ask box and Photo → AI notes and diagrams (cycle / flow / tree layouts, optional numbered practice blanks).
 - Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".

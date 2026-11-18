@@ -85,6 +85,20 @@ function Cell({ ch, glyph, onChange }: { ch: string; glyph?: Glyph; onChange: (g
       <div className="relative rounded-xl bg-[var(--card)] shadow-[0_0_0_0.5px_var(--hairline)]" style={{ width: CW, height: CH }}>
         <div className="pointer-events-none absolute inset-x-2 border-t border-dashed border-[var(--hairline)]" style={{ top: TOP }} />
         <div className="pointer-events-none absolute inset-x-2 border-t border-[var(--ai-ring)]" style={{ top: BASE }} />
+        {/* Faint guide: the letter to trace, sitting on the baseline. Muted text color works in light and dark. */}
+        <svg className="pointer-events-none absolute inset-0 text-[var(--text-muted)]" width={CW} height={CH} aria-hidden>
+          <text
+            x={CW / 2}
+            y={BASE}
+            textAnchor="middle"
+            fill="currentColor"
+            opacity={0.28}
+            fontSize={UNIT / 0.72}
+            fontFamily='-apple-system, "SF Pro Text", system-ui, sans-serif'
+          >
+            {ch}
+          </text>
+        </svg>
         <span className="pointer-events-none absolute left-2 top-1 text-[12px] text-[var(--text-muted)]">{ch}</span>
         <canvas
           ref={ref}
@@ -159,6 +173,38 @@ export default function HandwritingSetup({
 }) {
   const [tab, setTab] = useState(SETS[0].id)
   const set = SETS.find((s) => s.id === tab)!
+  // Undo history across all characters: what each character looked like before each change.
+  const history = useRef<{ ch: string; prev: Glyph | undefined }[]>([])
+  const [canUndo, setCanUndo] = useState(false)
+  const [rev, setRev] = useState<Record<string, number>>({}) // bumps a cell's key so it reloads after undo
+  const latest = useRef(glyphs)
+  useEffect(() => {
+    latest.current = glyphs
+  })
+
+  const change = (ch: string, g: Glyph | null) => {
+    history.current.push({ ch, prev: latest.current[ch] })
+    setCanUndo(true)
+    const next = { ...latest.current }
+    if (g) next[ch] = g
+    else delete next[ch]
+    latest.current = next
+    onChange(next)
+  }
+
+  const undo = () => {
+    const h = history.current.pop()
+    if (!h) return
+    const next = { ...latest.current }
+    if (h.prev) next[h.ch] = h.prev
+    else delete next[h.ch]
+    latest.current = next
+    onChange(next)
+    setRev((r) => ({ ...r, [h.ch]: (r[h.ch] ?? 0) + 1 }))
+    const owner = SETS.find((s) => s.chars.includes(h.ch))
+    if (owner) setTab(owner.id)
+    setCanUndo(history.current.length > 0)
+  }
   const done = SETS.flatMap((s) => s.chars).filter((c) => glyphs[c]).length
 
   return (
@@ -173,6 +219,19 @@ export default function HandwritingSetup({
             Write each character between the lines. {done} of {HANDWRITING_CHAR_COUNT} done.
           </p>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            aria-label="Undo last stroke"
+            disabled={!canUndo}
+            onClick={undo}
+            className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--text)] [touch-action:manipulation] active:bg-[var(--press)] disabled:opacity-30"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 14L4 9l5-5" />
+              <path d="M4 9h10a6 6 0 010 12h-3" />
+            </svg>
+          </button>
         <button
           type="button"
           onClick={onClose}
@@ -180,6 +239,7 @@ export default function HandwritingSetup({
         >
           Done
         </button>
+        </div>
       </div>
       <div className="flex gap-1 px-4 pt-3">
         {SETS.map((s) => (
@@ -198,17 +258,7 @@ export default function HandwritingSetup({
       <div className="flex-1 overflow-y-auto px-4 pb-10 pt-4" style={{ paddingBottom: "calc(40px + env(safe-area-inset-bottom))" }}>
         <div className="grid justify-center gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, ${CW}px)` }}>
           {set.chars.map((ch) => (
-            <Cell
-              key={ch}
-              ch={ch}
-              glyph={glyphs[ch]}
-              onChange={(g) => {
-                const next = { ...glyphs }
-                if (g) next[ch] = g
-                else delete next[ch]
-                onChange(next)
-              }}
-            />
+            <Cell key={`${ch}:${rev[ch] ?? 0}`} ch={ch} glyph={glyphs[ch]} onChange={(g) => change(ch, g)} />
           ))}
         </div>
       </div>
