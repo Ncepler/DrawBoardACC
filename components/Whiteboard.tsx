@@ -33,6 +33,7 @@ export default function Whiteboard() {
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [canUndo, setCanUndo] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const stateRef = useRef<AppState | null>(null)
   const toolRef = useRef<Tool>("pen")
@@ -121,6 +122,13 @@ export default function Whiteboard() {
   }, [renderLive])
 
   // ---------- analysis loop ----------
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flash = useCallback((msg: string) => {
+    setNotice(msg)
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(() => setNotice(null), 3500)
+  }, [])
+
   const cancelAnalysis = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current)
     idleTimer.current = null
@@ -129,7 +137,8 @@ export default function Whiteboard() {
     setBusy(false)
   }, [])
 
-  const runAnalysis = useCallback(async () => {
+  const runAnalysis = useCallback(
+    async (manual = false) => {
     idleTimer.current = null
     if (drawing.current) return
     const board = activeBoard()
@@ -138,7 +147,8 @@ export default function Whiteboard() {
       if (board.answers.length) patchBoard(board.id, (b) => ({ ...b, answers: [] }))
       return
     }
-    if (board.inkVersion === board.lastAnalyzedVersion) return
+    // Enter forces a pass even if the ink hasn't changed since the last one.
+    if (!manual && board.inkVersion === board.lastAnalyzedVersion) return
 
     const version = board.inkVersion
     const boardId = board.id
@@ -156,6 +166,7 @@ export default function Whiteboard() {
     setBusy(true)
 
     let items: AnswerItem[] | null = null
+    let failure = "network"
     for (let attempt = 0; attempt < 2 && !ctrl.signal.aborted; attempt++) {
       try {
         const res = await fetch("/api/answer", {
@@ -169,6 +180,7 @@ export default function Whiteboard() {
           items = Array.isArray(data.items) ? data.items : []
           break
         }
+        failure = String(res.status)
         if (res.status < 500) break // client-side problem: retrying won't help
       } catch {
         if (ctrl.signal.aborted) break
@@ -180,7 +192,12 @@ export default function Whiteboard() {
       abortRef.current = null
       setBusy(false)
     }
-    if (ctrl.signal.aborted || !items) return
+    if (ctrl.signal.aborted) return
+    if (!items) {
+      if (manual) flash(`Couldn't analyze (${failure})`)
+      return
+    }
+    if (manual && items.length === 0) flash("No question mark found")
     const now = stateRef.current
     const cur = now?.boards.find((b) => b.id === boardId)
     if (!now || now.activeBoardId !== boardId || !cur || cur.inkVersion !== version) return
@@ -190,11 +207,25 @@ export default function Whiteboard() {
       answers: mergeAnswers(got, exported.region, b.answers),
       lastAnalyzedVersion: version,
     }))
-  }, [activeBoard, patchBoard])
+    },
+    [activeBoard, patchBoard, flash],
+  )
 
   const scheduleIdle = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current)
     idleTimer.current = setTimeout(() => void runAnalysis(), IDLE_MS)
+  }, [runAnalysis])
+
+  // Enter = analyze the board right now.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || e.repeat || drawing.current) return
+      e.preventDefault()
+      if (idleTimer.current) clearTimeout(idleTimer.current)
+      void runAnalysis(true)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
   }, [runAnalysis])
 
   // ---------- load / save ----------
@@ -490,6 +521,15 @@ export default function Whiteboard() {
         onAdd={addBoard}
       />
       <Toolbar tool={tool} onTool={changeTool} canUndo={canUndo} onUndo={undo} />
+
+      {notice && (
+        <div
+          className="pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 rounded-full border border-black/10 bg-white/80 px-3 py-1.5 text-[13px] text-[#1d1d1f] shadow-[0_4px_24px_rgba(0,0,0,0.12)] backdrop-blur-xl"
+          style={{ top: "calc(16px + env(safe-area-inset-top))" }}
+        >
+          {notice}
+        </div>
+      )}
 
       {busy && (
         <div

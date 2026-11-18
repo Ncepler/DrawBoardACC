@@ -131,10 +131,13 @@ export async function POST(req: Request) {
     try {
       parsed = JSON.parse(res.text ?? "")
     } catch {
+      console.error("gemini returned non-JSON output")
       return json({ error: "bad_model_output" }, 502)
     }
     return json(sanitize(parsed))
-  } catch {
+  } catch (err) {
+    // Error details only: never the image or any answer text.
+    console.error("gemini call failed:", String((err as Error)?.message ?? err).slice(0, 300))
     return json({ error: "upstream" }, 502)
   }
 }
