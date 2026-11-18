@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
-import AnswerOverlay, { type Selection } from "./AnswerOverlay"
+import AnswerOverlay, { makeDefaultRenderer, placeAnswers, type AnswerRenderer, type Selection } from "./AnswerOverlay"
 import Composer from "./Composer"
 import InlineEditor from "./InlineEditor"
 import HandwritingSetup from "./HandwritingSetup"
 import SettingsPanel from "./SettingsPanel"
 import Sidebar from "./Sidebar"
 import Toolbar, { type Tool } from "./Toolbar"
-import { exportBoardPng, mergeAnswers, pruneAnswers } from "@/lib/analysis"
+import { boxToBoard, exportBoardPng, mergeAnswers, pruneAnswers } from "@/lib/analysis"
 import { cardSize, fitScale, naturalSize } from "@/lib/cards"
 import { isCorrect } from "@/lib/check"
 import { BLANK_H, BLANK_W, layoutDiagram } from "@/lib/diagram"
@@ -243,6 +243,11 @@ export default function Whiteboard() {
     setBusy(false)
   }, [])
 
+  // Latest renderer and card-maker, so analysis can place answers like the overlay does and run "create" commands.
+  const rendererRef = useRef<AnswerRenderer | null>(null)
+  const createRef = useRef<(prompt: string, photo: string | null, at: { x: number; y: number }, source?: string) => void>(() => {})
+  const makingRef = useRef(new Set<string>())
+
   const runAnalysis = useCallback(
     async (manual = false) => {
     idleTimer.current = null
@@ -263,7 +268,13 @@ export default function Whiteboard() {
     const { w, h } = sizeRef.current
     let exported
     try {
-      exported = await exportBoardPng(board.strokes, board.cards ?? [], board.texts ?? [], w, h)
+      const rects = rendererRef.current
+        ? [...placeAnswers(board.answers, board.cards ?? [], w, h, rendererRef.current)].flatMap(([id, r]) => {
+            const a = board.answers.find((x) => x.id === id)
+            return a ? [{ text: a.text, kind: a.kind, left: r.left, top: r.top, w: r.w, h: r.h }] : []
+          })
+        : []
+      exported = await exportBoardPng(board.strokes, board.cards ?? [], board.texts ?? [], rects, w, h)
     } catch {
       return
     }
@@ -312,12 +323,21 @@ export default function Whiteboard() {
     const now = stateRef.current
     const cur = now?.boards.find((b) => b.id === boardId)
     if (!now || now.activeBoardId !== boardId || !cur || cur.inkVersion !== version) return
-    const got = items
+    const got = items.filter((i) => i.kind !== "create")
+    const creates = items.filter((i) => i.kind === "create")
     patchBoard(boardId, (b) => ({
       ...b,
       answers: mergeAnswers(got, exported.region, b.answers),
       lastAnalyzedVersion: version,
     }))
+    // Written commands to make a diagram or note: once each, placed under the command.
+    for (const c of creates) {
+      const key = (c.reading || c.answer).toLowerCase().replace(/[^a-z0-9]/g, "")
+      if (!key || makingRef.current.has(key) || (cur.cards ?? []).some((k) => k.source === key)) continue
+      makingRef.current.add(key)
+      const box = boxToBoard(c.box, exported.region)
+      createRef.current(c.answer, null, { x: box.x, y: box.y + box.h + 12 }, key)
+    }
     },
     [activeBoard, patchBoard, flash],
   )
@@ -390,6 +410,9 @@ export default function Whiteboard() {
   }, [settings.theme])
 
   const glyphs = useMemo(() => glyphSetFor(userGlyphs, settings.handwriting), [userGlyphs, settings.handwriting])
+  useEffect(() => {
+    rendererRef.current = makeDefaultRenderer(glyphs, dark ? THEME.dark.ai : THEME.light.ai, settings.handwriting && Object.keys(userGlyphs).length > 0)
+  })
 
   useEffect(() => {
     if (!state) return
@@ -803,7 +826,7 @@ export default function Whiteboard() {
   }
 
   /** Ask box / photo: the AI makes a note or a diagram and it's placed where the user asked. */
-  const createCard = async (prompt: string, photo: string | null, at: { x: number; y: number }) => {
+  const createCard = async (prompt: string, photo: string | null, at: { x: number; y: number }, source?: string) => {
     const board = activeBoard()
     if (!board) return
     const pid = crypto.randomUUID()
@@ -825,15 +848,20 @@ export default function Whiteboard() {
       const nat = naturalSize(payload)
       const cur = stateRef.current?.boards.find((b) => b.id === board.id)
       const { x, y } = freeSpot(at, nat.w * scale, nat.h * scale, vw, vh, cur)
-      const card = { ...payload, id: crypto.randomUUID(), pos: { x, y }, scale, prompt, createdAt: Date.now() } as Card
+      const card = { ...payload, id: crypto.randomUUID(), pos: { x, y }, scale, prompt, source, createdAt: Date.now() } as Card
       patchBoard(board.id, (b) => ({ ...b, cards: [...(b.cards ?? []), card] }))
       pushUndo(board.id, { type: "card-add", card })
     } catch {
       flash("Couldn't create: network")
     } finally {
+      if (source) makingRef.current.delete(source)
       setPending((p) => p.filter((x) => x.id !== pid))
     }
   }
+
+  useEffect(() => {
+    createRef.current = (p, ph, at, src) => void createCard(p, ph, at, src)
+  })
 
   const submitComposer = (prompt: string) => {
     const c = composer

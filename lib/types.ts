@@ -45,6 +45,7 @@ export type Card = {
   pos: { x: number; y: number }
   scale: number
   prompt?: string
+  source?: string // the model's reading of the written command that made this card (avoids making it twice)
   createdAt: number
 } & ({ type: "diagram"; diagram: Diagram } | { type: "note"; title: string; text: string })
 
@@ -72,7 +73,7 @@ export type AppState = {
 
 export type AnswerItem = {
   reading?: string
-  kind?: AnswerKind
+  kind?: AnswerKind | "create" // "create": the student wrote a command to make a diagram or note; answer = the request
   box: [number, number, number, number] // ymin, xmin, ymax, xmax, 0-1000
   answer: string
   confidence: "high" | "low"

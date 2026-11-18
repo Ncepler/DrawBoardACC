@@ -26,8 +26,8 @@ The idea: draw a "?" right where the gap is, keep going, and the answer shows up
 
 1. The student draws (pen strokes) and/or types (Text tool) on the board.
 2. The student taps **Analyze** (or presses Enter on a keyboard). Automatic analysis after a pause is optional (Settings → "Analyze automatically when I pause", idle delay is one named constant, 2500 ms); it is OFF by default to save API quota.
-3. The app exports the student's content as a PNG: ink strokes, typed text, and any practice diagrams (drawn gray). Never AI answers or AI notes.
-4. `/api/answer` sends the image to Gemini, which returns items: what it read, what kind of response (math / term / explain / check), the answer, a confidence, and the box of what it answers.
+3. The app exports everything on the board as a PNG: ink strokes and typed text (black), practice diagrams (gray), and the app's earlier answers (blue, so follow-ups like "÷ 2" under an answer build on it). AI notes and non-practice cards are left out.
+4. `/api/answer` sends the image to Gemini, which returns only NEW items: what it read, what kind of response (math / term / explain / check, or create), the answer, a confidence, and the box of what it answers. It handles commands as well as questions ("define…", "write out a diagram for…").
 5. Each answer is shown next to what it answers, on the overlay layer.
 
 Second loop (creation): Ask box or Photo → `/api/create` → Gemini returns a note or a diagram (nodes + edges + optional numbered blanks) → the app lays it out and places it on the board as a draggable card.
@@ -113,7 +113,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 | Drawing must feel like Apple's ink (Notes/Freeform) | Pen feel is a top priority |
 | Apple Pencil, finger and mouse all draw | Stated requirement |
 | Ink stored as vector strokes, not pixels | Crisp at any size, erasable by stroke, re-exportable |
-| AI answers and AI notes are never in the image sent to Gemini; practice diagrams ARE (in gray) | Gemini must not read its own answers, but must see the practice sheet to check filled blanks |
+| Earlier AI answers ARE in the image sent to Gemini, drawn blue; AI notes/cards are not; practice diagrams are in gray | Noah's request: follow-ups build on answers (3+3 → 6, then "÷ 2" → 3). The prompt tells Gemini never to re-answer blue text |
 | Typed practice answers are checked locally (strict on numbers, forgiving on case/spacing/typos); pen-filled blanks are checked by Gemini | Instant, free, and deterministic for typed answers |
 | Wrong answers are worse than no answer: confidence returned, low confidence shown muted | Study tool correctness (see section 12) |
 | Light, dark, and system appearance | Noah's request |
@@ -229,7 +229,7 @@ type AppState = { boards; activeBoardId; sidebarOpen; version: 1 }
 - Manual by default: Analyze button or Enter. With auto-analyze on, the idle timer resets on every stroke point and fires only when content changed since the last analysis (`inkVersion !== lastAnalyzedVersion`).
 - Empty board (no strokes, typed text, or practice diagram): never call the API ("Draw something first").
 - Only one analysis request in flight. Starting a new stroke or switching boards aborts it; late results for a changed or inactive board are ignored.
-- After a result: replace the board's answers. For an item near an existing answer whose `source` (transcription) is unchanged, keep the old answer (no flicker). If the problem changed, take the new answer but keep the user's dragged position.
+- After a result: ADD the new answers to the board's existing ones (nothing is replaced; a follow-up becomes its own answer). An item that repeats an existing answer's problem in the same spot is dropped, so the old one and its dragged position stay. `create` items (a written command to make a diagram/note) call `/api/create` once each (tracked by `Card.source`) and place the card under the command.
 - API failure: never blocks drawing; one retry for 5xx/network, then a short notice ("Couldn't analyze: Gemini quota exceeded, check API key billing", etc.).
 - `/api/create` (Ask/Photo) runs independently of analysis; several can be pending.
 
@@ -307,7 +307,7 @@ Suggested manual test cases (expected answers are examples; Noah confirms):
 6. Drawing mid-request cancels cleanly with no stale answer.
 7. API errors never break drawing; the notice says why.
 8. The key is never in client code (`grep -r GEMINI_API_KEY .next/static` → 0 hits); `next build` and `eslint` pass.
-9. AI answers and notes are never in the image sent to Gemini.
+9. AI notes/cards are never in the image sent to Gemini; earlier answers are, in blue, and Gemini doesn't re-answer them.
 10. Every tap target is ≥44px. Ask/Text work with a keyboard on Mac and with the on-screen keyboard on iPad.
 11. Items can be selected, moved, deleted, and undone. Practice blanks can be filled by pen or by typing and checked.
 
@@ -365,7 +365,7 @@ If it passes: build the live practice mode and handwriting output next. Hardware
 - **Board content:** the student's ink strokes and typed text, plus practice diagrams. This is what gets sent to Gemini.
 - **Overlay:** AI answers, AI notes/diagrams, typed text, and editors drawn above the ink. AI items are never sent to Gemini as answers.
 - **Analysis pass:** one Analyze (or idle-triggered) round trip to `/api/answer`.
-- **Answer kind:** math, term, explain, or check. Each kind has its own length cap and renderer.
+- **Answer kind:** math, term, explain, or check. Each kind has its own length cap and renderer. A fifth item kind, create, isn't an answer: it makes a card.
 - **Card:** an AI note or diagram created via Ask or Photo.
 - **Practice blank:** a numbered empty box in a diagram whose answer the student fills in.
 - **Glyph set:** the stroke shapes used to draw answers (built-in, or the user's own handwriting).

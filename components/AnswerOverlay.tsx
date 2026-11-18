@@ -189,7 +189,7 @@ const overlaps = (a: Rect, b: Rect) =>
   a.left < b.left + b.w && a.left + a.w > b.left && a.top < b.top + b.h && a.top + a.h > b.top
 
 /** Prefer right of what it answers, then below, left, above; stay on-screen, avoid other items. */
-function place(answers: Answer[], cards: Card[], vw: number, vh: number, renderer: AnswerRenderer) {
+export function placeAnswers(answers: Answer[], cards: Card[], vw: number, vh: number, renderer: AnswerRenderer) {
   const placed: Rect[] = cards.map((c) => ({ left: c.pos.x, top: c.pos.y, ...cardSize(c) }))
   const out = new Map<string, Rect>()
   for (const a of answers) {
@@ -325,7 +325,7 @@ export default function AnswerOverlay({
   handwriting?: boolean
 }) {
   const renderer = makeDefaultRenderer(glyphs, aiColor, handwriting)
-  const positions = place(answers, cards, width, height, renderer)
+  const positions = placeAnswers(answers, cards, width, height, renderer)
   const maxW = width - 16
   const bounds = { w: width, h: height }
   return (
