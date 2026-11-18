@@ -1,14 +1,27 @@
-import { EXPORT_MAX_SIDE, INK_COLOR, MAX_ANSWER_WORDS } from "./config"
+import { cardSize } from "./cards"
+import { EXPORT_MAX_SIDE, INK_COLOR } from "./config"
+import { EXPORT_COLORS, diagramSvg, layoutDiagram } from "./diagram"
+import { truncateWords, KIND_LIMITS } from "./format"
 import { drawStroke } from "./ink"
-import type { Answer, AnswerItem, Stroke } from "./types"
+import type { Answer, AnswerItem, Card, Stroke } from "./types"
 
 export type ExportRegion = { x: number; y: number; w: number; h: number }
 
+function loadSvg(svg: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  })
+}
+
 /**
- * Renders ONLY the vector strokes (white bg, ink) to a PNG. The overlay is DOM,
- * so it can never end up in this image.
+ * Renders the student's vector strokes (and any practice diagrams, in gray) to a
+ * PNG. AI answers and notes live on the DOM overlay and are never drawn here, so
+ * Gemini never reads its own answers.
  */
-export function exportInkPng(strokes: Stroke[], viewW: number, viewH: number) {
+export async function exportBoardPng(strokes: Stroke[], cards: Card[], viewW: number, viewH: number) {
   const pad = 24
   let x0 = 0, y0 = 0, x1 = viewW, y1 = viewH
   for (const s of strokes) {
@@ -18,6 +31,14 @@ export function exportInkPng(strokes: Stroke[], viewW: number, viewH: number) {
       x1 = Math.max(x1, p.x + pad)
       y1 = Math.max(y1, p.y + pad)
     }
+  }
+  const diagrams = cards.filter((c) => c.type === "diagram")
+  for (const c of diagrams) {
+    const { w, h } = cardSize(c)
+    x0 = Math.min(x0, c.pos.x - pad)
+    y0 = Math.min(y0, c.pos.y - pad)
+    x1 = Math.max(x1, c.pos.x + w + pad)
+    y1 = Math.max(y1, c.pos.y + h + pad)
   }
   const region: ExportRegion = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
   const scale = Math.min(1, EXPORT_MAX_SIDE / Math.max(region.w, region.h))
@@ -30,14 +51,20 @@ export function exportInkPng(strokes: Stroke[], viewW: number, viewH: number) {
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.scale(scale, scale)
   ctx.translate(-region.x, -region.y)
+  for (const c of diagrams) {
+    if (c.type !== "diagram") continue
+    try {
+      const laid = layoutDiagram(c.diagram)
+      const img = await loadSvg(diagramSvg(c.diagram, laid, EXPORT_COLORS))
+      ctx.drawImage(img, c.pos.x, c.pos.y, laid.w * c.scale, laid.h * c.scale)
+    } catch {
+      // a diagram that fails to rasterize is skipped, the ink still goes
+    }
+  }
   // Thicker than on screen so thin strokes stay legible after downscaling.
   for (const s of strokes) drawStroke(ctx, { ...s, color: INK_COLOR, width: Math.max(s.width * 1.5, 4 / scale) })
   const dataUrl = canvas.toDataURL("image/png")
   return { base64: dataUrl.slice(dataUrl.indexOf(",") + 1), region }
-}
-
-export function truncateWords(text: string, max = MAX_ANSWER_WORDS) {
-  return text.trim().split(/\s+/).slice(0, max).join(" ")
 }
 
 const norm = (t: string | undefined) => (t ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -78,6 +105,7 @@ export function mergeAnswers(
       }
     }
     const source = it.reading ?? ""
+    const kind = it.kind ?? "term"
     if (match) {
       used.add(match.id)
       const same = norm(match.source) === norm(source) && norm(source) !== ""
@@ -85,7 +113,8 @@ export function mergeAnswers(
       return {
         id: match.id,
         box,
-        text: truncateWords(it.answer),
+        kind,
+        text: truncateWords(it.answer, KIND_LIMITS[kind]),
         confidence: it.confidence,
         source,
         pos: match.pos,
@@ -95,7 +124,8 @@ export function mergeAnswers(
     return {
       id: crypto.randomUUID(),
       box,
-      text: truncateWords(it.answer),
+      kind,
+      text: truncateWords(it.answer, KIND_LIMITS[kind]),
       confidence: it.confidence,
       source,
       createdAt: Date.now(),

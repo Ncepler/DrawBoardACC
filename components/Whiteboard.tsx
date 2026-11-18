@@ -1,18 +1,42 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import AnswerOverlay from "./AnswerOverlay"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { flushSync } from "react-dom"
+import AnswerOverlay, { type Selection } from "./AnswerOverlay"
+import Composer from "./Composer"
+import HandwritingSetup from "./HandwritingSetup"
+import SettingsPanel from "./SettingsPanel"
 import Sidebar from "./Sidebar"
 import Toolbar, { type Tool } from "./Toolbar"
-import { exportInkPng, mergeAnswers, pruneAnswers } from "@/lib/analysis"
-import { AUTO_ANALYZE, ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
+import { exportBoardPng, mergeAnswers, pruneAnswers } from "@/lib/analysis"
+import { cardSize, fitScale, naturalSize } from "@/lib/cards"
+import { ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
+import { DEMOS, inkFromText } from "@/lib/demos"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
+import { failureText, photoToJpeg } from "@/lib/photo"
+import {
+  DEFAULT_SETTINGS,
+  THEME,
+  glyphSetFor,
+  loadGlyphs,
+  loadSettings,
+  resolveDark,
+  saveGlyphs,
+  saveSettings,
+  type Settings,
+  type UserGlyphs,
+} from "@/lib/settings"
 import { initialState, loadState, newBoard, saveState } from "@/lib/storage"
-import type { AnswerItem, AppState, Board, Point, Stroke } from "@/lib/types"
+import type { Answer, AnswerItem, AppState, Board, Card, CardPayload, Point, Stroke } from "@/lib/types"
 
 type UndoAction =
   | { type: "add"; stroke: Stroke }
   | { type: "erase"; items: { stroke: Stroke; index: number }[] }
+  | { type: "card-add"; card: Card }
+  | { type: "card-del"; card: Card; index: number }
+  | { type: "answer-del"; answer: Answer; index: number }
+
+type ComposerState = { x: number; y: number; prompt: string; photo: { dataUrl: string; base64: string } | null }
 
 type Drawing = {
   pointerId: number
@@ -27,6 +51,28 @@ type Drawing = {
 
 const MAX_BUFFER_PIXELS = 16_000_000
 
+/** Nearest spot to `at` (spiralling out) where a w×h card overlaps no other card or answer. */
+function freeSpot(at: { x: number; y: number }, w: number, h: number, vw: number, vh: number, board?: Board) {
+  const clampX = (x: number) => Math.min(Math.max(8, x), Math.max(8, vw - w - 8))
+  const clampY = (y: number) => Math.min(Math.max(8, y), Math.max(8, vh - h - 90))
+  const taken = [
+    ...(board?.cards ?? []).map((c) => ({ x: c.pos.x, y: c.pos.y, ...cardSize(c) })),
+    ...(board?.answers ?? []).map((a) => (a.pos ? { ...a.box, x: a.pos.x, y: a.pos.y } : a.box)),
+  ]
+  const free = (x: number, y: number) =>
+    !taken.some((r) => x < r.x + r.w + 12 && x + w + 12 > r.x && y < r.y + r.h + 12 && y + h + 12 > r.y)
+  for (let radius = 0; radius <= 600; radius += 40) {
+    const steps = radius === 0 ? 1 : 16
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2
+      const x = clampX(at.x + radius * Math.cos(a))
+      const y = clampY(at.y + radius * Math.sin(a))
+      if (free(x, y)) return { x, y }
+    }
+  }
+  return { x: clampX(at.x), y: clampY(at.y) }
+}
+
 export default function Whiteboard() {
   const [state, setState] = useState<AppState | null>(null)
   const [tool, setTool] = useState<Tool>("pen")
@@ -34,6 +80,17 @@ export default function Whiteboard() {
   const [canUndo, setCanUndo] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Selection>(null)
+  const [composer, setComposer] = useState<ComposerState | null>(null)
+  const [pending, setPending] = useState<{ id: string; boardId: string; x: number; y: number }[]>([])
+  const photoInput = useRef<HTMLInputElement>(null)
+  const askTap = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS)
+  const settingsRef = useRef<Settings>(DEFAULT_SETTINGS)
+  const [userGlyphs, setUserGlyphs] = useState<UserGlyphs>({})
+  const [panel, setPanel] = useState<"settings" | "handwriting" | null>(null)
+  const [dark, setDark] = useState(false)
+  const inkColor = useRef(THEME.light.ink)
 
   const stateRef = useRef<AppState | null>(null)
   const toolRef = useRef<Tool>("pen")
@@ -86,7 +143,7 @@ export default function Whiteboard() {
     if (!board) return
     const d = dprRef.current
     ctx.setTransform(d, 0, 0, d, 0, 0)
-    for (const s of board.strokes) drawStroke(ctx, s)
+    for (const s of board.strokes) drawStroke(ctx, { ...s, color: inkColor.current })
   }, [activeBoard])
 
   const clearLive = useCallback(() => {
@@ -107,7 +164,7 @@ export default function Whiteboard() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const pts = d.predicted.length ? [...d.stroke.points, ...d.predicted] : d.stroke.points
     const path = strokePath(pts, d.stroke.real, d.stroke.width, false)
-    ctx.fillStyle = d.stroke.color
+    ctx.fillStyle = inkColor.current
     if (path) ctx.fill(path)
     else {
       const p = pts[0]
@@ -123,10 +180,10 @@ export default function Whiteboard() {
 
   // ---------- analysis loop ----------
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const flash = useCallback((msg: string) => {
+  const flash = useCallback((msg: string, ms = 3500) => {
     setNotice(msg)
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
-    noticeTimer.current = setTimeout(() => setNotice(null), 3500)
+    noticeTimer.current = setTimeout(() => setNotice(null), ms)
   }, [])
 
   const cancelAnalysis = useCallback(() => {
@@ -143,7 +200,8 @@ export default function Whiteboard() {
     if (drawing.current) return
     const board = activeBoard()
     if (!board) return
-    if (board.strokes.length === 0) {
+    const practice = (board.cards ?? []).some((c) => c.type === "diagram")
+    if (board.strokes.length === 0 && !practice) {
       if (manual) flash("Draw something first")
       if (board.answers.length) patchBoard(board.id, (b) => ({ ...b, answers: [] }))
       return
@@ -156,7 +214,7 @@ export default function Whiteboard() {
     const { w, h } = sizeRef.current
     let exported
     try {
-      exported = exportInkPng(board.strokes, w, h)
+      exported = await exportBoardPng(board.strokes, board.cards ?? [], w, h)
     } catch {
       return
     }
@@ -183,9 +241,7 @@ export default function Whiteboard() {
         }
         failure = String(res.status)
         try {
-          const e = ((await res.json()) as { error?: string }).error
-          if (e === "quota") failure = "Gemini quota exceeded, check API key billing"
-          else if (e === "rate_limited") failure = "too many requests, wait a minute"
+          failure = failureText(res.status, ((await res.json()) as { error?: string }).error)
         } catch {}
         if (res.status < 500) break // client-side problem: retrying won't help
       } catch {
@@ -218,7 +274,7 @@ export default function Whiteboard() {
   )
 
   const scheduleIdle = useCallback(() => {
-    if (!AUTO_ANALYZE) return
+    if (!settingsRef.current.autoAnalyze) return
     if (idleTimer.current) clearTimeout(idleTimer.current)
     idleTimer.current = setTimeout(() => void runAnalysis(), IDLE_MS)
   }, [runAnalysis])
@@ -229,12 +285,25 @@ export default function Whiteboard() {
     void runAnalysis(true)
   }, [runAnalysis])
 
-  // Enter = analyze the board right now.
+  // Keyboard: Enter analyzes, Delete removes the selected item, Escape deselects.
+  // Ignored while typing in the Ask box.
+  const deleteRef = useRef<(s: NonNullable<Selection>) => void>(() => {})
+  const selectedRef = useRef<Selection>(null)
+  useEffect(() => {
+    selectedRef.current = selected
+  }, [selected])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Enter" || e.repeat || drawing.current) return
-      e.preventDefault()
-      analyzeNow()
+      if ((e.target as HTMLElement | null)?.closest?.("input, textarea")) return
+      if (e.key === "Enter" && !e.repeat && !drawing.current) {
+        e.preventDefault()
+        analyzeNow()
+      } else if ((e.key === "Backspace" || e.key === "Delete") && selectedRef.current) {
+        e.preventDefault()
+        deleteRef.current(selectedRef.current)
+      } else if (e.key === "Escape") {
+        setSelected(null)
+      }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -245,7 +314,33 @@ export default function Whiteboard() {
     // localStorage is only readable on the client, so hydrate after mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     commit(loadState() ?? initialState())
+    const st = loadSettings()
+    settingsRef.current = st
+    setSettingsState(st)
+    setUserGlyphs(loadGlyphs())
   }, [commit])
+
+  const updateSettings = (next: Settings) => {
+    settingsRef.current = next
+    setSettingsState(next)
+    saveSettings(next)
+  }
+
+  // Theme: class on <html> drives the CSS variables; the canvas ink color follows.
+  useEffect(() => {
+    const apply = () => {
+      const d = !!resolveDark(settings.theme)
+      document.documentElement.classList.toggle("dark", d)
+      inkColor.current = d ? THEME.dark.ink : THEME.light.ink
+      setDark(d)
+    }
+    apply()
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)")
+    mq?.addEventListener?.("change", apply)
+    return () => mq?.removeEventListener?.("change", apply)
+  }, [settings.theme])
+
+  const glyphs = useMemo(() => glyphSetFor(userGlyphs, settings.handwriting), [userGlyphs, settings.handwriting])
 
   useEffect(() => {
     if (!state) return
@@ -291,11 +386,38 @@ export default function Whiteboard() {
     }
   }, [hydrated, redrawInk])
 
+  // ---------- demo boards (/?demo=<id> from the demo page) ----------
+  const demoDone = useRef(false)
+  useEffect(() => {
+    if (!hydrated || demoDone.current) return
+    demoDone.current = true
+    const id = new URLSearchParams(window.location.search).get("demo")
+    if (!id) return
+    window.history.replaceState(null, "", window.location.pathname)
+    const demo = DEMOS.find((d) => d.id === id)
+    const s = stateRef.current
+    if (!demo || !s) return
+    const b = newBoard(s.boards.length + 1)
+    b.name = `Demo: ${demo.title}`
+    b.strokes = (demo.ink ?? []).flatMap((t) => inkFromText(t.text, t.x, t.y, t.h))
+    b.inkVersion = b.strokes.length ? 1 : 0
+    if (demo.diagram) {
+      const payload: CardPayload = { type: "diagram", diagram: demo.diagram.diagram }
+      const { w, h } = sizeRef.current
+      b.cards = [
+        { ...payload, id: crypto.randomUUID(), pos: { x: demo.diagram.x, y: demo.diagram.y }, scale: fitScale(payload, w, h), createdAt: Date.now() },
+      ]
+    }
+    commit({ ...s, boards: [...s.boards, b], activeBoardId: b.id, sidebarOpen: false })
+    if (demo.ask) setComposer({ x: demo.ask.x, y: demo.ask.y, prompt: demo.ask.prompt, photo: null })
+    flash(demo.hint, 7000)
+  }, [hydrated, commit, flash])
+
   const activeId = state?.activeBoardId
   useEffect(() => {
     redrawInk()
     syncUndo()
-  }, [activeId, redrawInk, syncUndo])
+  }, [activeId, dark, redrawInk, syncUndo])
 
   useEffect(() => () => cancelAnalysis(), [cancelAnalysis])
 
@@ -338,6 +460,17 @@ export default function Whiteboard() {
     const now = performance.now()
     const isPen = e.pointerType === "pen"
     const isTouch = e.pointerType === "touch"
+    setSelected(null)
+
+    if (toolRef.current === "ask") {
+      if (isTouch && (penDown.current || now < penUntil.current)) return // palm
+      // Open the box on lift, not here: the press would steal focus back from it,
+      // and iPad only shows the keyboard when focus happens inside the tap.
+      e.preventDefault()
+      const rect = e.currentTarget.getBoundingClientRect()
+      askTap.current = { pointerId: e.pointerId, x: e.clientX - rect.left, y: e.clientY - rect.top }
+      return
+    }
 
     if (isPen) {
       penDown.current = true
@@ -417,6 +550,18 @@ export default function Whiteboard() {
       penUntil.current = performance.now() + PEN_REJECT_MS
     }
     touches.current.delete(e.pointerId)
+    const tap = askTap.current
+    if (tap && tap.pointerId === e.pointerId) {
+      askTap.current = null
+      if (e.type === "pointercancel") return
+      toolRef.current = "pen"
+      // flushSync mounts the box (and its autoFocus) inside this event, so the keyboard opens.
+      flushSync(() => {
+        setTool("pen")
+        setComposer({ x: tap.x, y: tap.y, prompt: "", photo: null })
+      })
+      return
+    }
     const d = drawing.current
     if (!d || d.pointerId !== e.pointerId) return
     drawing.current = null
@@ -430,7 +575,7 @@ export default function Whiteboard() {
       const ctx = inkRef.current?.getContext("2d")
       if (ctx) {
         ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0)
-        drawStroke(ctx, stroke)
+        drawStroke(ctx, { ...stroke, color: inkColor.current })
       }
       clearLive()
       stack.push({ type: "add", stroke })
@@ -454,6 +599,22 @@ export default function Whiteboard() {
     if (!board || drawing.current) return
     const action = undoStacks.current.get(board.id)?.pop()
     if (!action) return
+    if (action.type === "card-add" || action.type === "card-del" || action.type === "answer-del") {
+      patchBoard(board.id, (b) => {
+        if (action.type === "card-add") return { ...b, cards: (b.cards ?? []).filter((c) => c.id !== action.card.id) }
+        if (action.type === "card-del") {
+          const cards = [...(b.cards ?? [])]
+          cards.splice(Math.min(action.index, cards.length), 0, action.card)
+          return { ...b, cards }
+        }
+        const answers = [...b.answers]
+        answers.splice(Math.min(action.index, answers.length), 0, action.answer)
+        return { ...b, answers }
+      })
+      setSelected(null)
+      syncUndo()
+      return
+    }
     patchBoard(board.id, (b) => {
       let strokes = b.strokes
       let answers = b.answers
@@ -490,6 +651,90 @@ export default function Whiteboard() {
     commit({ ...s, boards: [...s.boards, b], activeBoardId: b.id })
   }
 
+  const pushUndo = (boardId: string, a: UndoAction) => {
+    const stack = undoStacks.current.get(boardId) ?? []
+    stack.push(a)
+    undoStacks.current.set(boardId, stack)
+    syncUndo()
+  }
+
+  const deleteItem = (sel: NonNullable<Selection>) => {
+    const b = activeBoard()
+    if (!b) return
+    if (sel.type === "answer") {
+      const index = b.answers.findIndex((a) => a.id === sel.id)
+      if (index < 0) return
+      pushUndo(b.id, { type: "answer-del", answer: b.answers[index], index })
+      patchBoard(b.id, (bd) => ({ ...bd, answers: bd.answers.filter((a) => a.id !== sel.id) }))
+    } else {
+      const cards = b.cards ?? []
+      const index = cards.findIndex((c) => c.id === sel.id)
+      if (index < 0) return
+      pushUndo(b.id, { type: "card-del", card: cards[index], index })
+      patchBoard(b.id, (bd) => ({ ...bd, cards: (bd.cards ?? []).filter((c) => c.id !== sel.id) }))
+    }
+    setSelected(null)
+  }
+  useEffect(() => {
+    deleteRef.current = deleteItem
+  })
+
+  const moveCard = (id: string, x: number, y: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, cards: (bd.cards ?? []).map((c) => (c.id === id ? { ...c, pos: { x, y } } : c)) }))
+  }
+
+  /** Ask box / photo: the AI makes a note or a diagram and it's placed where the user asked. */
+  const createCard = async (prompt: string, photo: string | null, at: { x: number; y: number }) => {
+    const board = activeBoard()
+    if (!board) return
+    const pid = crypto.randomUUID()
+    setPending((p) => [...p, { id: pid, boardId: board.id, x: at.x, y: at.y }])
+    try {
+      const res = await fetch("/api/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(photo ? { prompt, image: photo } : { prompt }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { card?: CardPayload; error?: string }
+      if (!res.ok || !data.card) {
+        flash(`Couldn't create: ${failureText(res.status, data.error)}`)
+        return
+      }
+      const payload = data.card
+      const { w: vw, h: vh } = sizeRef.current
+      const scale = fitScale(payload, vw, vh)
+      const nat = naturalSize(payload)
+      const cur = stateRef.current?.boards.find((b) => b.id === board.id)
+      const { x, y } = freeSpot(at, nat.w * scale, nat.h * scale, vw, vh, cur)
+      const card = { ...payload, id: crypto.randomUUID(), pos: { x, y }, scale, prompt, createdAt: Date.now() } as Card
+      patchBoard(board.id, (b) => ({ ...b, cards: [...(b.cards ?? []), card] }))
+      pushUndo(board.id, { type: "card-add", card })
+    } catch {
+      flash("Couldn't create: network")
+    } finally {
+      setPending((p) => p.filter((x) => x.id !== pid))
+    }
+  }
+
+  const submitComposer = (prompt: string) => {
+    const c = composer
+    if (!c) return
+    setComposer(null)
+    void createCard(prompt, c.photo?.base64 ?? null, { x: c.x, y: c.y })
+  }
+
+  const onPhotoPicked = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const photo = await photoToJpeg(file)
+      const { w, h } = sizeRef.current
+      setComposer({ x: Math.max(12, w / 2 - 170), y: Math.max(12, h / 2 - 160), prompt: "Turn this into a diagram", photo })
+    } catch {
+      flash("Couldn't read that photo")
+    }
+  }
+
   const moveAnswer = (id: string, x: number, y: number) => {
     const b = activeBoard()
     if (b) patchBoard(b.id, (bd) => ({ ...bd, answers: bd.answers.map((a) => (a.id === id ? { ...a, pos: { x, y } } : a)) }))
@@ -503,13 +748,14 @@ export default function Whiteboard() {
   const changeTool = (t: Tool) => {
     toolRef.current = t
     setTool(t)
+    if (t === "ask") flash("Tap where the answer should go")
   }
 
-  if (!state) return <div className="fixed inset-0 bg-white" />
+  if (!state) return <div className="fixed inset-0 bg-[var(--board)]" />
   const board = state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0]
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-white">
+    <div className="fixed inset-0 overflow-hidden bg-[var(--board)]">
       <div
         ref={hostRef}
         className="absolute inset-0 [touch-action:none] select-none [-webkit-touch-callout:none]"
@@ -521,15 +767,51 @@ export default function Whiteboard() {
       >
         <canvas ref={inkRef} className="absolute inset-0 h-full w-full" />
         <canvas ref={liveRef} className="absolute inset-0 h-full w-full" />
-        <AnswerOverlay answers={board.answers} width={size.w} height={size.h} onMove={moveAnswer} />
+        <AnswerOverlay
+          answers={board.answers}
+          cards={board.cards ?? []}
+          pending={pending.filter((p) => p.boardId === board.id)}
+          width={size.w}
+          height={size.h}
+          selected={selected}
+          onSelect={setSelected}
+          onMoveAnswer={moveAnswer}
+          onMoveCard={moveCard}
+          onDelete={deleteItem}
+          glyphs={glyphs}
+          aiColor={dark ? THEME.dark.ai : THEME.light.ai}
+          dark={dark}
+        />
+        {composer && (
+          <Composer
+            key={`${composer.x},${composer.y}`}
+            x={composer.x}
+            y={composer.y}
+            bounds={size}
+            initialPrompt={composer.prompt}
+            photo={composer.photo?.dataUrl ?? null}
+            onSubmit={submitComposer}
+            onCancel={() => setComposer(null)}
+          />
+        )}
       </div>
+      <input
+        ref={photoInput}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          void onPhotoPicked(e.target.files?.[0])
+          e.target.value = ""
+        }}
+      />
 
       <button
         type="button"
         aria-label={state.sidebarOpen ? "Hide boards" : "Show boards"}
         aria-pressed={state.sidebarOpen}
         onClick={toggleSidebar}
-        className="absolute z-30 flex h-11 w-11 items-center justify-center rounded-full border border-black/10 bg-white/70 text-[#1d1d1f] shadow-[0_4px_24px_rgba(0,0,0,0.12)] backdrop-blur-xl [touch-action:manipulation] active:bg-black/10"
+        className="absolute z-30 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--chrome)] text-[var(--text)] shadow-[0_4px_24px_rgba(0,0,0,0.12)] backdrop-blur-xl [touch-action:manipulation] active:bg-[var(--press)]"
         style={{ left: "calc(12px + env(safe-area-inset-left))", top: "calc(12px + env(safe-area-inset-top))" }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -538,6 +820,39 @@ export default function Whiteboard() {
         </svg>
       </button>
 
+      <button
+        type="button"
+        aria-label="Settings"
+        aria-expanded={panel === "settings"}
+        onClick={() => setPanel(panel === "settings" ? null : "settings")}
+        className="absolute z-30 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--chrome)] text-[var(--text)] shadow-[0_4px_24px_rgba(0,0,0,0.12)] backdrop-blur-xl [touch-action:manipulation] active:bg-[var(--press)]"
+        style={{ right: "calc(12px + env(safe-area-inset-right))", top: "calc(12px + env(safe-area-inset-top))" }}
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" />
+        </svg>
+      </button>
+      {panel === "settings" && (
+        <SettingsPanel
+          settings={settings}
+          glyphCount={Object.keys(userGlyphs).length}
+          onChange={updateSettings}
+          onSetupHandwriting={() => setPanel("handwriting")}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel === "handwriting" && (
+        <HandwritingSetup
+          glyphs={userGlyphs}
+          onChange={(g) => {
+            setUserGlyphs(g)
+            saveGlyphs(g)
+          }}
+          onClose={() => setPanel(null)}
+        />
+      )}
+
       <Sidebar
         boards={state.boards}
         activeId={state.activeBoardId}
@@ -545,23 +860,25 @@ export default function Whiteboard() {
         onSelect={selectBoard}
         onAdd={addBoard}
       />
-      <Toolbar tool={tool} onTool={changeTool} canUndo={canUndo} onUndo={undo} busy={busy} onAnalyze={analyzeNow} />
+      <Toolbar
+        tool={tool}
+        onTool={changeTool}
+        canUndo={canUndo}
+        onUndo={undo}
+        onPhoto={() => photoInput.current?.click()}
+        busy={busy}
+        onAnalyze={analyzeNow}
+      />
 
       {notice && (
         <div
-          className="pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 rounded-full border border-black/10 bg-white/80 px-3 py-1.5 text-[13px] text-[#1d1d1f] shadow-[0_4px_24px_rgba(0,0,0,0.12)] backdrop-blur-xl"
+          className="pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 rounded-full border border-[var(--hairline)] bg-[var(--chrome-strong)] px-3 py-1.5 text-[13px] text-[var(--text)] shadow-[0_4px_24px_rgba(0,0,0,0.12)] backdrop-blur-xl"
           style={{ top: "calc(16px + env(safe-area-inset-top))" }}
         >
           {notice}
         </div>
       )}
 
-      {busy && (
-        <div
-          className="pointer-events-none absolute z-10 h-2 w-2 animate-pulse rounded-full bg-[#007AFF]/60"
-          style={{ right: "calc(16px + env(safe-area-inset-right))", top: "calc(16px + env(safe-area-inset-top))" }}
-        />
-      )}
     </div>
   )
 }

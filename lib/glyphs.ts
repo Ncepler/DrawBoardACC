@@ -88,6 +88,28 @@ const GLYPHS: Record<string, Glyph> = {
   },
   "-": { width: 0.55, strokes: [line([0.04, 0.55], [0.5, 0.55])] },
   ".": { width: 0.14, strokes: [loop(0.07, 0.95, 0.035, 0.035, 0, 1.1)] },
+  "=": { width: 0.6, strokes: [line([0.04, 0.42], [0.56, 0.42]), line([0.04, 0.68], [0.56, 0.68])] },
+  "+": { width: 0.6, strokes: [line([0.04, 0.55], [0.56, 0.55]), line([0.3, 0.29], [0.3, 0.81])] },
+  "/": { width: 0.45, strokes: [line([0.42, 0], [0.03, 1])] },
+  "(": { width: 0.3, strokes: [curve([[0.26, -0.04], [0.08, 0.25], [0.04, 0.5], [0.08, 0.75], [0.26, 1.04]])] },
+  ")": { width: 0.3, strokes: [curve([[0.04, -0.04], [0.22, 0.25], [0.26, 0.5], [0.22, 0.75], [0.04, 1.04]])] },
+  x: { width: 0.5, strokes: [line([0.04, 0.4], [0.46, 1]), line([0.46, 0.4], [0.04, 1])] },
+  "×": { width: 0.5, strokes: [line([0.06, 0.38], [0.44, 0.86]), line([0.44, 0.38], [0.06, 0.86])] },
+  y: { width: 0.5, strokes: [line([0.04, 0.4], [0.26, 0.86]), curve([[0.48, 0.4], [0.3, 0.9], [0.2, 1.12], [0.06, 1.2]])] },
+  " ": { width: 0.15, strokes: [] },
+}
+GLYPHS["−"] = GLYPHS["-"]
+
+// Superscripts: the normal glyph, smaller and raised.
+const SUPERSCRIPTS: Record<string, string> = {
+  "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4", "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9", "⁻": "-", "⁺": "+",
+}
+for (const [sup, base] of Object.entries(SUPERSCRIPTS)) {
+  const g = GLYPHS[base]
+  GLYPHS[sup] = {
+    width: g.width * 0.55,
+    strokes: g.strokes.map((st) => st.map(([x, y]) => [x * 0.55, y * 0.5 - 0.06] as [number, number])),
+  }
 }
 
 export const builtinGlyphs: GlyphSet = { get: (ch) => GLYPHS[ch] }
