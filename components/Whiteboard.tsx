@@ -203,7 +203,7 @@ export default function Whiteboard() {
       if (manual) flash(`Couldn't analyze: ${failure}`)
       return
     }
-    if (manual && items.length === 0) flash("No question mark found")
+    if (manual && items.length === 0) flash("Nothing to answer found")
     const now = stateRef.current
     const cur = now?.boards.find((b) => b.id === boardId)
     if (!now || now.activeBoardId !== boardId || !cur || cur.inkVersion !== version) return

@@ -14,17 +14,21 @@ const RATE_LIMIT_PER_IP = 12 // per minute
 const RATE_LIMIT_GLOBAL = 60 // per minute, per server instance
 const WINDOW_MS = 60_000
 
-const INSTRUCTION = `You read hand-drawn whiteboards. The image is a whiteboard with handwriting and diagrams.
+const INSTRUCTION = `You are a study assistant looking at a student's hand-drawn whiteboard: handwriting, math, and diagrams. Read the WHOLE board and decide what the student wants answered or completed. A question mark is NOT required.
 
-Step 1: find EVERY question mark the user drew. Hand-drawn question marks are usually a hook on top of a short vertical stroke, often with the dot missing, tiny, or separated from the stroke. A question mark can be big, small, or slanted. Look carefully at the whole image, including the edges, and look especially after an "=" sign or at the end of a line of writing. If you see a shape like that, count it. Do not skip a question mark just because the handwriting is messy.
+Respond to:
+- Written questions and prompts, with or without a question mark (for example "Explain civil war", "capital of France").
+- Math problems and equations to solve, including an expression that ends in "=" with nothing after it (for example "1+1=" or "3x^2 + 6x + 9 = ?").
+- Blanks, empty boxes, and diagram labels that are missing a name, and any question mark standing where a term or value should go. Hand-drawn question marks are a hook over a short stem, often with the dot missing or separate.
 
-Step 2: for each question mark, read the line of writing it belongs to and put your transcription of that line in "reading" (for example "3x^2 + 6x + 9 = ?").
+Do NOT respond to: work that already has its answer (for example "1+1=2"), titles, headings, plain notes, labels that are already filled in, or doodles. If you are not sure the student wants a response to something, skip it. Never answer the same thing twice.
 
-Step 3: give the answer in "answer": at most 6 words, a term, number, or short phrase, never a sentence. For a math problem, solve it and give the result (for example the simplified expression or the value). For a diagram with a missing label, use the surrounding labels, arrows and structure to name what belongs there. If you can read the question but cannot answer it confidently in 6 words, still return the item with your best short answer and confidence "low". Use "high" only when you are sure.
+For each thing you respond to:
+- "reading": your transcription of the problem or prompt (for example "3x^2 + 6x + 9 =").
+- "answer": at most 6 words, a term, number, or short phrase, never a sentence. For math, solve it and give the result. For a diagram blank, name what belongs there using the surrounding labels, arrows and structure. If you can read it but are unsure, give your best short answer with confidence "low". Use "high" only when you are sure.
+- "box": the tight bounding box of the whole problem or prompt you are responding to (the full line or region, not just one symbol) as [ymin, xmin, ymax, xmax], normalized to 0-1000. The answer will be shown to the right of this box.
 
-"box" is the tight bounding box of the question mark itself (hook, stem and dot together) as [ymin, xmin, ymax, xmax], normalized to 0-1000.
-
-Return found=false with an empty items list only if there is truly no question mark anywhere in the image.`
+Return found=false with an empty items list only if there is nothing on the board to respond to.`
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -77,7 +81,7 @@ function originOk(req: Request) {
 const json = (body: unknown, status = 200) => Response.json(body, { status })
 
 function sanitize(raw: unknown) {
-  const items: { box: number[]; answer: string; confidence: "high" | "low" }[] = []
+  const items: { reading: string; box: number[]; answer: string; confidence: "high" | "low" }[] = []
   const list = (raw as { items?: unknown })?.items
   if (!Array.isArray(list)) return { found: false, items }
   for (const it of list.slice(0, MAX_ITEMS)) {
@@ -90,7 +94,9 @@ function sanitize(raw: unknown) {
     const text = answer.trim().split(/\s+/).slice(0, MAX_WORDS).join(" ")
     if (!text) continue
     const confidence = (it as { confidence?: unknown }).confidence === "high" ? "high" : "low"
-    items.push({ box: [ymin, xmin, ymax, xmax], answer: text, confidence })
+    const r = (it as { reading?: unknown }).reading
+    const reading = typeof r === "string" ? r.trim().slice(0, 160) : ""
+    items.push({ reading, box: [ymin, xmin, ymax, xmax], answer: text, confidence })
   }
   return { found: items.length > 0, items }
 }
@@ -144,7 +150,7 @@ export async function POST(req: Request) {
               role: "user",
               parts: [
                 { inlineData: { mimeType: "image/png", data: image } },
-                { text: "Find every question mark on this whiteboard and answer each one." },
+                { text: "Look at the whole whiteboard and respond to everything the student wants answered." },
               ],
             },
           ],

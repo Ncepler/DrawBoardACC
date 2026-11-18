@@ -15,6 +15,7 @@ export type Answer = {
   box: { x: number; y: number; w: number; h: number }
   text: string
   confidence: "high" | "low"
+  source?: string // model's transcription of what this answers; used to tell if the problem changed
   pos?: { x: number; y: number } // set when the user drags the answer; overrides auto-placement
   createdAt: number
 }
@@ -37,6 +38,7 @@ export type AppState = {
 }
 
 export type AnswerItem = {
+  reading?: string
   box: [number, number, number, number] // ymin, xmin, ymax, xmax, 0-1000
   answer: string
   confidence: "high" | "low"
