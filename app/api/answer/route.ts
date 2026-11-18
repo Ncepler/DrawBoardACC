@@ -6,7 +6,7 @@ export const maxDuration = 30
 const GEMINI_MODEL = "gemini-3.8-flash"
 
 const MAX_WORDS = 6
-const MAX_BODY_BYTES = 6 * 1024 * 1024
+const MAX_BODY_BYTES = 4 * 1024 * 1024 // Vercel Hobby caps request bodies at 4.5MB
 const MAX_ITEMS = 8
 const RATE_LIMIT_PER_IP = 12 // per minute
 const RATE_LIMIT_GLOBAL = 60 // per minute, per server instance
