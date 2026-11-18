@@ -114,10 +114,10 @@ export const DEMOS: Demo[] = [
   {
     id: "practice",
     title: "Practice with blanks",
-    you: "Fill the numbered blanks with your pen",
+    you: "Type in the blanks with the T tool (or write with your pen)",
     get: "✓ or the right term for each blank",
     diagram: { diagram: CALVIN, x: 120, y: 90 },
-    hint: "Write in the numbered blanks, then tap Analyze",
+    hint: "Pick T, click a blank and type, then Check answers (or write with the pen and tap Analyze)",
   },
   {
     id: "make-practice",
@@ -126,6 +126,13 @@ export const DEMOS: Demo[] = [
     get: "A numbered fill-in diagram to study with",
     ask: { prompt: "Draw the Krebs cycle with 4 numbered blanks for me to fill in", x: 120, y: 120 },
     hint: "Tap Create, then fill in the blanks and tap Analyze",
+  },
+  {
+    id: "type",
+    title: "Type instead of draw",
+    you: "Pick T and type anywhere, e.g. “Krebs cycle?” or “12×12=”",
+    get: "Analyze answers typed text like handwriting",
+    hint: "Pick T in the toolbar, click the board and type, then tap Analyze",
   },
   {
     id: "photo",

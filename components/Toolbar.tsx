@@ -1,6 +1,6 @@
 "use client"
 
-export type Tool = "pen" | "eraser" | "ask"
+export type Tool = "pen" | "eraser" | "text" | "ask"
 
 const btn =
   "flex h-11 w-11 items-center justify-center rounded-full transition-colors duration-150 [touch-action:manipulation] disabled:opacity-30"
@@ -58,6 +58,17 @@ export default function Toolbar({
         <svg {...icon}>
           <path d="M9 14L4 9l5-5" />
           <path d="M4 9h10a6 6 0 010 12h-3" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        aria-label="Text: click to type on the board or in a blank"
+        aria-pressed={tool === "text"}
+        className={`${btn} ${tool === "text" ? active : idle}`}
+        onClick={() => onTool(tool === "text" ? "pen" : "text")}
+      >
+        <svg {...icon}>
+          <path d="M5 6.5V5h14v1.5M12 5v14M9.5 19h5" />
         </svg>
       </button>
       <div className="mx-0.5 h-6 w-px shrink-0 bg-[var(--hairline)]" />
