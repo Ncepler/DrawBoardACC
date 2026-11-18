@@ -31,10 +31,12 @@ export function loadState(): AppState | null {
   }
 }
 
-export function saveState(s: AppState) {
+/** False when the browser refused (storage full, private mode). */
+export function saveState(s: AppState): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+    return true
   } catch {
-    // quota / private mode: ignore
+    return false
   }
 }

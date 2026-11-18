@@ -9,7 +9,7 @@ import { builtinGlyphs, drawRun, measureRun, wrapRun, type GlyphSet } from "@/li
 import { HAND_FONT, textWidth, wrapLines } from "@/lib/measure"
 import { richRuns } from "@/lib/rich"
 import { TEXT_LINE, TEXT_PAD, textBoxSize } from "@/lib/texts"
-import type { Answer, Card, TextBox } from "@/lib/types"
+import type { Answer, BoardImage, Card, TextBox } from "@/lib/types"
 
 /**
  * Swap point for the future handwriting renderer: given an answer, report its
@@ -318,7 +318,7 @@ function GraphCard({ card, dark }: { card: Extract<Card, { type: "graph" }>; dar
   )
 }
 
-export type Selection = { type: "answer" | "card" | "text"; id: string } | null
+export type Selection = { type: "answer" | "card" | "text" | "image"; id: string } | null
 
 /** Text the student typed: same color as their ink, not AI blue. */
 function TypedText({ t }: { t: TextBox }) {
@@ -336,6 +336,11 @@ export default function AnswerOverlay({
   answers,
   cards,
   texts,
+  images,
+  onMoveImage,
+  onDragImage,
+  onScaleImage,
+  onScaleImageDone,
   editingTextId,
   pending,
   width,
@@ -361,6 +366,11 @@ export default function AnswerOverlay({
   answers: Answer[]
   cards: Card[]
   texts: TextBox[]
+  images: BoardImage[]
+  onMoveImage: (id: string, x: number, y: number) => void
+  onDragImage: (id: string, pos: { x: number; y: number } | null) => void
+  onScaleImage: (id: string, scale: number) => void
+  onScaleImageDone: (id: string, prev: number, next: number) => void
   editingTextId: string | null
   pending: { id: string; x: number; y: number }[]
   width: number // screen width, used only to cap answer size
@@ -388,6 +398,29 @@ export default function AnswerOverlay({
   const maxW = width - 16
   return (
     <div className="pointer-events-none absolute left-0 top-0" aria-live="polite">
+      {/* The photo itself is drawn under the ink (Whiteboard); this is its frame: grab strip, resize and delete. */}
+      {images.map((im) => {
+        const sel = selected?.type === "image" && selected.id === im.id
+        return (
+          <Draggable
+            key={im.id}
+            x={im.pos.x}
+            y={im.pos.y}
+            w={im.w * im.scale}
+            h={im.h * im.scale}
+            scale={scale}
+            selected={sel}
+            handle={1}
+            onSelect={() => onSelect(sel ? null : { type: "image", id: im.id })}
+            onMove={(x, y) => onMoveImage(im.id, x, y)}
+            onDrag={(p) => onDragImage(im.id, p)}
+            onDelete={() => onDelete({ type: "image", id: im.id })}
+            resize={{ scale: im.scale, onLive: (v) => onScaleImage(im.id, v), onDone: (a, b) => onScaleImageDone(im.id, a, b) }}
+          >
+            <div style={{ width: im.w * im.scale, height: im.h * im.scale }} />
+          </Draggable>
+        )
+      })}
       {cards.map((c) => {
         const { w, h } = cardSize(c)
         const sel = selected?.type === "card" && selected.id === c.id

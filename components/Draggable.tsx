@@ -17,6 +17,7 @@ export default function Draggable({
   selected,
   onSelect,
   onMove,
+  onDrag,
   onDelete,
   handle,
   actions,
@@ -34,6 +35,8 @@ export default function Draggable({
   selected: boolean
   onSelect: () => void
   onMove: (x: number, y: number) => void
+  /** Live position while dragging (null when the drag ends), for things drawn elsewhere that must follow. */
+  onDrag?: (pos: { x: number; y: number } | null) => void
   onDelete: () => void
   /** If set, only a strip this tall along the top grabs the item; the rest lets the pen draw through. */
   handle?: number
@@ -59,6 +62,7 @@ export default function Draggable({
     grab.current = null
     if (g?.moved && drag) onMove(drag.x, drag.y)
     else if (g) onSelect()
+    onDrag?.(null)
     setDrag(null)
   }
 
@@ -93,7 +97,9 @@ export default function Draggable({
         const dy = e.clientY - g.sy
         if (!g.moved && Math.hypot(dx, dy) < 5) return // a tap isn't a move
         g.moved = true
-        setDrag({ x: g.ox + dx / scale, y: g.oy + dy / scale })
+        const next = { x: g.ox + dx / scale, y: g.oy + dy / scale }
+        setDrag(next)
+        onDrag?.(next)
       }}
       onPointerUp={finish}
       onPointerCancel={finish}

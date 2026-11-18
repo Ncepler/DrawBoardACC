@@ -64,6 +64,9 @@ export type Card = {
 /** Text the student typed on the board (Text tool). Counts as their own writing for Analyze. */
 export type TextBox = { id: string; pos: { x: number; y: number }; text: string; size: number; createdAt: number }
 
+/** A photo placed on the board to draw over. Sits under the ink. */
+export type BoardImage = { id: string; pos: { x: number; y: number }; w: number; h: number; scale: number; src: string; createdAt: number }
+
 export type Board = {
   id: string
   name: string
@@ -71,6 +74,7 @@ export type Board = {
   answers: Answer[]
   cards?: Card[]
   texts?: TextBox[]
+  images?: BoardImage[]
   inkVersion: number
   lastAnalyzedVersion: number
   updatedAt: number

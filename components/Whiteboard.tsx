@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import AnswerOverlay, { answerMode, makeDefaultRenderer, placeAnswers, type AnswerRenderer, type Selection } from "./AnswerOverlay"
 import Composer from "./Composer"
+import PhotoChoice from "./PhotoChoice"
 import InlineEditor from "./InlineEditor"
 import HandwritingSetup from "./HandwritingSetup"
 import SettingsPanel from "./SettingsPanel"
@@ -31,12 +32,15 @@ import {
   type UserGlyphs,
 } from "@/lib/settings"
 import { initialState, loadState, newBoard, saveState } from "@/lib/storage"
-import type { Answer, AnswerItem, AppState, Board, Card, CardPayload, Point, Stroke, TextBox } from "@/lib/types"
+import type { Answer, AnswerItem, AppState, Board, BoardImage, Card, CardPayload, Point, Stroke, TextBox } from "@/lib/types"
 
 type UndoAction =
   | { type: "add"; stroke: Stroke }
   | { type: "erase"; items: { stroke: Stroke; index: number }[]; answers?: { answer: Answer; index: number }[] }
-  | { type: "card-add"; card: Card }
+  | { type: "card-add"; card: Card; reopen?: { x: number; y: number; prompt: string; photo: ComposerState["photo"] } }
+  | { type: "image-add"; image: BoardImage }
+  | { type: "image-del"; image: BoardImage; index: number }
+  | { type: "image-scale"; id: string; prev: number; next: number }
   | { type: "card-del"; card: Card; index: number }
   | { type: "answer-del"; answer: Answer; index: number }
   | { type: "text-add"; text: TextBox }
@@ -44,7 +48,7 @@ type UndoAction =
   | { type: "text-edit"; id: string; prev: string; next: string }
   | { type: "fill"; cardId: string; nodeId: string; prev?: string; next?: string }
   | { type: "card-scale"; id: string; prev: number; next: number }
-  | { type: "clear"; strokes: Stroke[]; answers: Answer[]; cards: Card[]; texts: TextBox[] }
+  | { type: "clear"; strokes: Stroke[]; answers: Answer[]; cards: Card[]; texts: TextBox[]; images: BoardImage[] }
 
 /** Open Text-tool editor: a new box, an existing box, or a practice blank. */
 type EditorState =
@@ -100,7 +104,7 @@ function freeSpot(at: { x: number; y: number }, w: number, h: number, vis: Rect,
 }
 
 /** Ink-like changes bump inkVersion so auto-analyze notices them. */
-const isBlank = (b: Board) => !b.strokes.length && !b.answers.length && !b.cards?.length && !b.texts?.length
+const isBlank = (b: Board) => !b.strokes.length && !b.answers.length && !b.cards?.length && !b.texts?.length && !b.images?.length
 
 const bump = (b: Board): Board => ({ ...b, inkVersion: b.inkVersion + 1, updatedAt: Date.now() })
 
@@ -131,6 +135,12 @@ function redoBoard(b: Board, a: UndoAction): Board {
     }
     case "card-add":
       return { ...b, cards: [...(b.cards ?? []), a.card] }
+    case "image-add":
+      return { ...b, images: [...(b.images ?? []), a.image] }
+    case "image-del":
+      return { ...b, images: (b.images ?? []).filter((i) => i.id !== a.image.id) }
+    case "image-scale":
+      return { ...b, images: (b.images ?? []).map((i) => (i.id === a.id ? { ...i, scale: a.next } : i)) }
     case "card-del":
       return { ...b, cards: (b.cards ?? []).filter((c) => c.id !== a.card.id) }
     case "answer-del":
@@ -146,7 +156,7 @@ function redoBoard(b: Board, a: UndoAction): Board {
     case "card-scale":
       return { ...b, cards: (b.cards ?? []).map((c) => (c.id === a.id ? { ...c, scale: a.next } : c)) }
     case "clear":
-      return bump({ ...b, strokes: [], answers: [], cards: [], texts: [] })
+      return bump({ ...b, strokes: [], answers: [], cards: [], texts: [], images: [] })
   }
 }
 
@@ -173,6 +183,8 @@ export default function Whiteboard() {
   const [notice, setNotice] = useState<string | null>(null)
   const [selected, setSelected] = useState<Selection>(null)
   const [composer, setComposer] = useState<ComposerState | null>(null)
+  const [photoChoice, setPhotoChoice] = useState<{ file: File; photo: NonNullable<ComposerState["photo"]> } | null>(null)
+  const [imgDrag, setImgDrag] = useState<{ id: string; x: number; y: number } | null>(null)
   const [pending, setPending] = useState<{ id: string; boardId: string; x: number; y: number }[]>([])
   const photoInput = useRef<HTMLInputElement>(null)
   const askTap = useRef<{ pointerId: number; x: number; y: number; tool: "ask" | "text" } | null>(null)
@@ -204,6 +216,7 @@ export default function Whiteboard() {
   const touches = useRef(new Set<number>())
   const penDown = useRef(false)
   const penUntil = useRef(0)
+  const warnedSave = useRef(false)
   const undoStacks = useRef(new Map<string, UndoAction[]>())
   const redoStacks = useRef(new Map<string, UndoAction[]>())
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -360,7 +373,7 @@ export default function Whiteboard() {
             return a ? [{ text: a.text, kind: a.kind, left: r.left, top: r.top, w: r.w, h: r.h }] : []
           })
         : []
-      exported = await exportBoardPng(board.strokes, board.cards ?? [], board.texts ?? [], rects, w, h)
+      exported = await exportBoardPng(board.strokes, board.cards ?? [], board.texts ?? [], rects, w, h, board.images ?? [])
     } catch {
       return
     }
@@ -526,14 +539,19 @@ export default function Whiteboard() {
 
   useEffect(() => {
     if (!state) return
-    const t = setTimeout(() => saveState(state), 400)
-    const flush = () => saveState(stateRef.current ?? state)
+    const save = (s: AppState) => {
+      if (saveState(s) || warnedSave.current) return
+      warnedSave.current = true
+      flash("Couldn't save: the board is too big (photos are large). Delete a photo.", 6000)
+    }
+    const t = setTimeout(() => save(state), 400)
+    const flush = () => save(stateRef.current ?? state)
     window.addEventListener("pagehide", flush)
     return () => {
       clearTimeout(t)
       window.removeEventListener("pagehide", flush)
     }
-  }, [state])
+  }, [state, flash])
 
   // ---------- sizing ----------
   const hydrated = state !== null
@@ -957,7 +975,7 @@ export default function Whiteboard() {
     redoStacks.current.set(board.id, redo)
     setSelected(null)
     if (action.type === "clear") {
-      patchBoard(board.id, (b) => bump({ ...b, strokes: action.strokes, answers: action.answers, cards: action.cards, texts: action.texts }))
+      patchBoard(board.id, (b) => bump({ ...b, strokes: action.strokes, answers: action.answers, cards: action.cards, texts: action.texts, images: action.images }))
       redrawInk()
     } else if (action.type === "text-add" || action.type === "text-del" || action.type === "text-edit" || action.type === "fill") {
       patchBoard(board.id, (b) => {
@@ -970,6 +988,15 @@ export default function Whiteboard() {
         if (action.type === "text-edit")
           return bump({ ...b, texts: texts.map((t) => (t.id === action.id ? { ...t, text: action.prev } : t)) })
         return { ...b, cards: setFill(b.cards ?? [], action.cardId, action.nodeId, action.prev) }
+      })
+    } else if (action.type === "image-add" || action.type === "image-del" || action.type === "image-scale") {
+      patchBoard(board.id, (b) => {
+        if (action.type === "image-add") return { ...b, images: (b.images ?? []).filter((i) => i.id !== action.image.id) }
+        if (action.type === "image-scale")
+          return { ...b, images: (b.images ?? []).map((i) => (i.id === action.id ? { ...i, scale: action.prev } : i)) }
+        const images = [...(b.images ?? [])]
+        images.splice(Math.min(action.index, images.length), 0, action.image)
+        return { ...b, images }
       })
     } else if (action.type === "card-scale") {
       patchBoard(board.id, (b) => ({ ...b, cards: (b.cards ?? []).map((c) => (c.id === action.id ? { ...c, scale: action.prev } : c)) }))
@@ -985,6 +1012,11 @@ export default function Whiteboard() {
         answers.splice(Math.min(action.index, answers.length), 0, action.answer)
         return { ...b, answers }
       })
+      // Undoing a freshly created diagram/note goes back to its prompt, ready to edit.
+      if (action.type === "card-add" && action.reopen) {
+        const r = action.reopen
+        flushSync(() => setComposer({ x: r.x, y: r.y, prompt: r.prompt, photo: r.photo }))
+      }
     } else {
       patchBoard(board.id, (b) => {
         let strokes = b.strokes
@@ -1018,6 +1050,7 @@ export default function Whiteboard() {
     stack.push(action)
     undoStacks.current.set(board.id, stack)
     setSelected(null)
+    if (action.type === "card-add") setComposer(null)
     patchBoard(board.id, (b) => redoBoard(b, action))
     redrawInk()
     syncUndo()
@@ -1031,6 +1064,18 @@ export default function Whiteboard() {
   const finishScale = (id: string, prev: number, next: number) => {
     const b = activeBoard()
     if (b && Math.abs(prev - next) > 0.001) pushUndo(b.id, { type: "card-scale", id, prev, next })
+  }
+  const scaleImage = (id: string, scale: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, images: (bd.images ?? []).map((i) => (i.id === id ? { ...i, scale } : i)) }))
+  }
+  const finishImageScale = (id: string, prev: number, next: number) => {
+    const b = activeBoard()
+    if (b && Math.abs(prev - next) > 0.001) pushUndo(b.id, { type: "image-scale", id, prev, next })
+  }
+  const moveImage = (id: string, x: number, y: number) => {
+    const b = activeBoard()
+    if (b) patchBoard(b.id, (bd) => ({ ...bd, images: (bd.images ?? []).map((i) => (i.id === id ? { ...i, pos: { x, y } } : i)) }))
   }
 
   const selectBoard = (id: string) => {
@@ -1054,8 +1099,8 @@ export default function Whiteboard() {
     const b = activeBoard()
     if (!b || drawing.current || isBlank(b)) return
     cancelAnalysis()
-    pushUndo(b.id, { type: "clear", strokes: b.strokes, answers: b.answers, cards: b.cards ?? [], texts: b.texts ?? [] })
-    patchBoard(b.id, (bd) => bump({ ...bd, strokes: [], answers: [], cards: [], texts: [] }))
+    pushUndo(b.id, { type: "clear", strokes: b.strokes, answers: b.answers, cards: b.cards ?? [], texts: b.texts ?? [], images: b.images ?? [] })
+    patchBoard(b.id, (bd) => bump({ ...bd, strokes: [], answers: [], cards: [], texts: [], images: [] }))
     setSelected(null)
     setEditor(null)
     redrawInk()
@@ -1069,6 +1114,12 @@ export default function Whiteboard() {
       if (index < 0) return
       pushUndo(b.id, { type: "answer-del", answer: b.answers[index], index })
       patchBoard(b.id, (bd) => ({ ...bd, answers: bd.answers.filter((a) => a.id !== sel.id) }))
+    } else if (sel.type === "image") {
+      const images = b.images ?? []
+      const index = images.findIndex((i) => i.id === sel.id)
+      if (index < 0) return
+      pushUndo(b.id, { type: "image-del", image: images[index], index })
+      patchBoard(b.id, (bd) => ({ ...bd, images: (bd.images ?? []).filter((i) => i.id !== sel.id) }))
     } else if (sel.type === "text") {
       const texts = b.texts ?? []
       const index = texts.findIndex((t) => t.id === sel.id)
@@ -1094,7 +1145,13 @@ export default function Whiteboard() {
   }
 
   /** Ask box / photo: the AI makes a note or a diagram and it's placed where the user asked. */
-  const createCard = async (prompt: string, photo: string | null, at: { x: number; y: number }, source?: string) => {
+  const createCard = async (
+    prompt: string,
+    photo: string | null,
+    at: { x: number; y: number },
+    source?: string,
+    reopen?: { x: number; y: number; prompt: string; photo: ComposerState["photo"] },
+  ) => {
     const board = activeBoard()
     if (!board) return
     const pid = crypto.randomUUID()
@@ -1118,7 +1175,7 @@ export default function Whiteboard() {
       const { x, y } = freeSpot(at, nat.w * scale, nat.h * scale, vis, cur)
       const card = { ...payload, id: crypto.randomUUID(), pos: { x, y }, scale, prompt, source, createdAt: Date.now() } as Card
       patchBoard(board.id, (b) => ({ ...b, cards: [...(b.cards ?? []), card] }))
-      pushUndo(board.id, { type: "card-add", card })
+      pushUndo(board.id, { type: "card-add", card, reopen })
     } catch {
       flash("Couldn't create: network")
     } finally {
@@ -1135,19 +1192,63 @@ export default function Whiteboard() {
     const c = composer
     if (!c) return
     setComposer(null)
-    void createCard(prompt, c.photo?.base64 ?? null, { x: c.x, y: c.y })
+    void createCard(prompt, c.photo?.base64 ?? null, { x: c.x, y: c.y }, undefined, { x: c.x, y: c.y, prompt, photo: c.photo })
+  }
+
+  /** Toolbar Create button: the same box as the demo's "make it for me", in the middle of the screen. */
+  const openCreate = () => {
+    changeTool("pen")
+    const { w, h } = sizeRef.current
+    const at = toBoard(Math.max(12, w / 2 - 170), Math.max(12, h / 2 - 140))
+    flushSync(() => setComposer({ x: at.x, y: at.y, prompt: "", photo: null }))
   }
 
   const onPhotoPicked = async (file: File | undefined) => {
     if (!file) return
     try {
-      const photo = await photoToJpeg(file)
-      const { w, h } = sizeRef.current
-      const at = toBoard(Math.max(12, w / 2 - 170), Math.max(12, h / 2 - 160))
-      setComposer({ x: at.x, y: at.y, prompt: "Turn this into a diagram", photo })
+      setPhotoChoice({ file, photo: await photoToJpeg(file) })
     } catch {
       flash("Couldn't read that photo")
     }
+  }
+
+  /** "Draw on it": put the photo on the board, under the ink, centered on screen. */
+  const addPhotoToBoard = async () => {
+    const pc = photoChoice
+    const b = activeBoard()
+    setPhotoChoice(null)
+    if (!pc || !b) return
+    try {
+      const p = await photoToJpeg(pc.file, 1400, 0.8)
+      const vis = visibleRect()
+      const scale = Math.min(1, (vis.w - 48) / p.w, (vis.h - 180 / vis.k) / p.h)
+      const w = p.w * scale
+      const h = p.h * scale
+      const image: BoardImage = {
+        id: crypto.randomUUID(),
+        pos: { x: vis.x + Math.max(8, (vis.w - w) / 2), y: vis.y + Math.max(8, (vis.h - h - 70 / vis.k) / 2) },
+        w: p.w,
+        h: p.h,
+        scale,
+        src: p.dataUrl,
+        createdAt: Date.now(),
+      }
+      pushUndo(b.id, { type: "image-add", image })
+      patchBoard(b.id, (bd) => ({ ...bd, images: [...(bd.images ?? []), image] }))
+      setSelected({ type: "image", id: image.id })
+    } catch {
+      flash("Couldn't read that photo")
+    }
+  }
+
+  /** "Make a diagram": open the Create box with the photo attached. */
+  const createFromPhoto = () => {
+    const pc = photoChoice
+    setPhotoChoice(null)
+    if (!pc) return
+    const { w, h } = sizeRef.current
+    const at = toBoard(Math.max(12, w / 2 - 170), Math.max(12, h / 2 - 160))
+    flushSync(() => setComposer({ x: at.x, y: at.y, prompt: "Turn this into a diagram", photo: pc.photo }))
   }
   // Paste an image (Cmd/Ctrl+V) or drop one on the board: same flow as the Photo button.
   const photoRef = useRef<(f: File) => void>(() => {})
@@ -1286,6 +1387,26 @@ export default function Whiteboard() {
         onPointerCancel={onPointerEnd}
         onContextMenu={(e) => e.preventDefault()}
       >
+        {/* photos sit under the ink so you can draw on them */}
+        <div
+          className="pointer-events-none absolute left-0 top-0 origin-top-left"
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
+        >
+          {(board.images ?? []).map((im) => {
+            const p = imgDrag?.id === im.id ? imgDrag : im.pos
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={im.id}
+                src={im.src}
+                alt=""
+                draggable={false}
+                className="absolute max-w-none select-none"
+                style={{ left: p.x, top: p.y, width: im.w * im.scale, height: im.h * im.scale }}
+              />
+            )
+          })}
+        </div>
         <canvas ref={inkRef} className="absolute inset-0 h-full w-full" />
         <canvas ref={liveRef} className="absolute inset-0 h-full w-full" />
         <div
@@ -1294,6 +1415,11 @@ export default function Whiteboard() {
         >
         <AnswerOverlay
           answers={board.answers}
+          images={board.images ?? []}
+          onMoveImage={moveImage}
+          onDragImage={(id, p) => setImgDrag(p ? { id, ...p } : null)}
+          onScaleImage={scaleImage}
+          onScaleImageDone={finishImageScale}
           onScaleCard={scaleCard}
           onScaleCardDone={finishScale}
           cards={board.cards ?? []}
@@ -1328,6 +1454,14 @@ export default function Whiteboard() {
           />
         )}
         </div>
+        {photoChoice && (
+          <PhotoChoice
+            preview={photoChoice.photo.dataUrl}
+            onAdd={() => void addPhotoToBoard()}
+            onCreate={createFromPhoto}
+            onCancel={() => setPhotoChoice(null)}
+          />
+        )}
         {composer && (
           <Composer
             key={`${composer.x},${composer.y}`}
@@ -1434,6 +1568,7 @@ export default function Whiteboard() {
         canClear={!isBlank(state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0])}
         onClear={clearBoard}
         onPhoto={() => photoInput.current?.click()}
+        onCreate={openCreate}
         busy={busy}
         onAnalyze={analyzeNow}
       />
