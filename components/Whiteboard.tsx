@@ -5,7 +5,7 @@ import AnswerOverlay from "./AnswerOverlay"
 import Sidebar from "./Sidebar"
 import Toolbar, { type Tool } from "./Toolbar"
 import { exportInkPng, mergeAnswers } from "@/lib/analysis"
-import { ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
+import { AUTO_ANALYZE, ERASER_RADIUS, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
 import { initialState, loadState, newBoard, saveState } from "@/lib/storage"
 import type { AnswerItem, AppState, Board, Point, Stroke } from "@/lib/types"
@@ -144,6 +144,7 @@ export default function Whiteboard() {
     const board = activeBoard()
     if (!board) return
     if (board.strokes.length === 0) {
+      if (manual) flash("Draw something first")
       if (board.answers.length) patchBoard(board.id, (b) => ({ ...b, answers: [] }))
       return
     }
@@ -217,8 +218,15 @@ export default function Whiteboard() {
   )
 
   const scheduleIdle = useCallback(() => {
+    if (!AUTO_ANALYZE) return
     if (idleTimer.current) clearTimeout(idleTimer.current)
     idleTimer.current = setTimeout(() => void runAnalysis(), IDLE_MS)
+  }, [runAnalysis])
+
+  const analyzeNow = useCallback(() => {
+    if (drawing.current) return
+    if (idleTimer.current) clearTimeout(idleTimer.current)
+    void runAnalysis(true)
   }, [runAnalysis])
 
   // Enter = analyze the board right now.
@@ -226,12 +234,11 @@ export default function Whiteboard() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || e.repeat || drawing.current) return
       e.preventDefault()
-      if (idleTimer.current) clearTimeout(idleTimer.current)
-      void runAnalysis(true)
+      analyzeNow()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [runAnalysis])
+  }, [analyzeNow])
 
   // ---------- load / save ----------
   useEffect(() => {
@@ -525,7 +532,7 @@ export default function Whiteboard() {
         onSelect={selectBoard}
         onAdd={addBoard}
       />
-      <Toolbar tool={tool} onTool={changeTool} canUndo={canUndo} onUndo={undo} />
+      <Toolbar tool={tool} onTool={changeTool} canUndo={canUndo} onUndo={undo} busy={busy} onAnalyze={analyzeNow} />
 
       {notice && (
         <div
