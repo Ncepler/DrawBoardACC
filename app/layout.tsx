@@ -4,7 +4,7 @@ import { THEME_BOOT_SCRIPT } from "@/lib/theme"
 
 export const metadata: Metadata = {
   title: "AI Whiteboard",
-  description: "Draw a question mark and get a short answer.",
+  description: "A whiteboard that answers: draw or write, tap Analyze.",
 }
 
 export const viewport: Viewport = {

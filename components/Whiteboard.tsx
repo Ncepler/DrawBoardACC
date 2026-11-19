@@ -50,6 +50,7 @@ type UndoAction =
   | { type: "text-edit"; id: string; prev: string; next: string }
   | { type: "fill"; cardId: string; nodeId: string; prev?: string; next?: string }
   | { type: "card-scale"; id: string; prev: number; next: number }
+  | { type: "card-replace"; id: string; prev: Card; next: Card }
   | { type: "clear"; strokes: Stroke[]; answers: Answer[]; cards: Card[]; texts: TextBox[]; images: BoardImage[] }
 
 /** Open Text-tool editor: a new box, an existing box, or a practice blank. */
@@ -58,7 +59,7 @@ type EditorState =
   | { kind: "edit"; id: string }
   | { kind: "blank"; cardId: string; nodeId: string; x: number; y: number; w: number; h: number; fs: number }
 
-type ComposerState = { x: number; y: number; prompt: string; photo: { dataUrl: string; base64: string } | null }
+type ComposerState = { x: number; y: number; prompt: string; photo: { dataUrl: string; base64: string } | null; editCardId?: string }
 
 type Drawing = {
   pointerId: number
@@ -158,6 +159,8 @@ function redoBoard(b: Board, a: UndoAction): Board {
       return { ...b, cards: setFill(b.cards ?? [], a.cardId, a.nodeId, a.next) }
     case "card-scale":
       return { ...b, cards: (b.cards ?? []).map((c) => (c.id === a.id ? { ...c, scale: a.next } : c)) }
+    case "card-replace":
+      return { ...b, cards: (b.cards ?? []).map((c) => (c.id === a.id ? a.next : c)) }
     case "clear":
       return bump({ ...b, strokes: [], answers: [], cards: [], texts: [], images: [] })
   }
@@ -1016,6 +1019,8 @@ export default function Whiteboard() {
       })
     } else if (action.type === "card-scale") {
       patchBoard(board.id, (b) => ({ ...b, cards: (b.cards ?? []).map((c) => (c.id === action.id ? { ...c, scale: action.prev } : c)) }))
+    } else if (action.type === "card-replace") {
+      patchBoard(board.id, (b) => ({ ...b, cards: (b.cards ?? []).map((c) => (c.id === action.id ? action.prev : c)) }))
     } else if (action.type === "card-add" || action.type === "card-del" || action.type === "answer-del") {
       patchBoard(board.id, (b) => {
         if (action.type === "card-add") return { ...b, cards: (b.cards ?? []).filter((c) => c.id !== action.card.id) }
@@ -1204,10 +1209,58 @@ export default function Whiteboard() {
     createRef.current = (p, ph, at, src) => void createCard(p, ph, at, src)
   })
 
+  /** "Change this": the card and the requested edit go to the model, and the result replaces the card in place (undoable). */
+  const reviseCard = async (cardId: string, change: string) => {
+    const board = activeBoard()
+    const old = board?.cards?.find((c) => c.id === cardId)
+    if (!board || !old) return
+    const pid = crypto.randomUUID()
+    setPending((p) => [...p, { id: pid, boardId: board.id, x: old.pos.x, y: old.pos.y }])
+    try {
+      let previous: CardPayload
+      if (old.type === "diagram") {
+        // typed practice answers and check marks stay out of the request; the correct labels are in the diagram
+        previous = { type: "diagram", diagram: { ...old.diagram, nodes: old.diagram.nodes.map((n) => (n.blank ? { id: n.id, label: n.label, blank: n.blank } : { id: n.id, label: n.label })) } }
+      } else if (old.type === "graph") previous = { type: "graph", graph: old.graph }
+      else previous = { type: "note", title: old.title, text: old.text }
+      const res = await fetch("/api/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: change, previous }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { card?: CardPayload; error?: string }
+      if (!res.ok || !data.card) {
+        flash(`Couldn't change it: ${failureText(res.status, data.error)}`)
+        return
+      }
+      const next = { ...data.card, id: old.id, pos: old.pos, scale: old.scale, prompt: old.prompt, source: old.source, createdAt: old.createdAt } as Card
+      patchBoard(board.id, (b) => ({ ...b, cards: (b.cards ?? []).map((c) => (c.id === cardId ? next : c)) }))
+      pushUndo(board.id, { type: "card-replace", id: cardId, prev: old, next })
+    } catch {
+      flash("Couldn't change it: network")
+    } finally {
+      setPending((p) => p.filter((x) => x.id !== pid))
+    }
+  }
+
+  const editCard = (cardId: string) => {
+    const b = activeBoard()
+    const c = b?.cards?.find((x) => x.id === cardId)
+    if (!c) return
+    setSelected(null)
+    const r = cardSize(c)
+    const at = { x: c.pos.x, y: c.pos.y + r.h + 12 }
+    flushSync(() => setComposer({ x: at.x, y: at.y, prompt: "", photo: null, editCardId: cardId }))
+  }
+
   const submitComposer = (prompt: string) => {
     const c = composer
     if (!c) return
     setComposer(null)
+    if (c.editCardId) {
+      void reviseCard(c.editCardId, prompt)
+      return
+    }
     void createCard(prompt, c.photo?.base64 ?? null, { x: c.x, y: c.y }, undefined, { x: c.x, y: c.y, prompt, photo: c.photo })
   }
 
@@ -1452,6 +1505,7 @@ export default function Whiteboard() {
           onMoveText={moveText}
           onEditText={(id) => setEditor({ kind: "edit", id })}
           onCheck={checkCard}
+          onEditCard={editCard}
           textTool={tool === "text"}
           glyphs={glyphs}
           aiColor={dark ? THEME.dark.ai : THEME.light.ai}
@@ -1485,6 +1539,7 @@ export default function Whiteboard() {
             bounds={size}
             initialPrompt={composer.prompt}
             photo={composer.photo?.dataUrl ?? null}
+            editing={composer.editCardId ? board.cards?.find((c) => c.id === composer.editCardId)?.type : undefined}
             onSubmit={submitComposer}
             onCancel={() => setComposer(null)}
           />
@@ -1594,6 +1649,33 @@ export default function Whiteboard() {
         busy={busy}
         onAnalyze={analyzeNow}
       />
+
+      {isBlank(board) && !composer && !editor && !pending.length && (
+        <div className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-6" style={{ top: "34%" }}>
+          <div className="max-w-sm text-center text-[var(--text-muted)]">
+            <div className="text-[22px] font-semibold tracking-tight text-[var(--text)]">Draw or write anything</div>
+            <p className="mt-1.5 text-[15px] leading-snug">
+              Try <span className="font-medium text-[var(--text)]">2 + 2 =</span> or a <span className="font-medium text-[var(--text)]">?</span> next to a
+              diagram, then tap <span className="font-medium text-[#007AFF]">Analyze</span>.
+            </p>
+            <div className="pointer-events-auto mt-4 flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={openCreate}
+                className="h-11 rounded-full bg-[#007AFF] px-5 text-[15px] font-medium text-white [touch-action:manipulation] active:opacity-80"
+              >
+                Make a diagram
+              </button>
+              <a
+                href="/examples"
+                className="flex h-11 items-center rounded-full border border-[var(--hairline)] bg-[var(--chrome)] px-5 text-[15px] font-medium text-[var(--text)] backdrop-blur-xl [touch-action:manipulation] active:bg-[var(--press)]"
+              >
+                See examples
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {notice && (
         <div

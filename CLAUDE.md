@@ -94,6 +94,8 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Shapes tool: pick a shape (square, rectangle, circle, oval, triangle, right triangle, diamond, pentagon, hexagon, star, line, arrow) from the palette above the toolbar, then drag on the board. Each shape is one ordinary stroke (`Stroke.shape`: constant width, sharp corners), so it can be erased, undone and is read by Analyze. The tool stays on until another is picked.
 - Geometry: for a drawn figure with an unknown angle or length, Gemini is told to answer with the value and a tight box around that unknown label or angle mark, so the answer lands at that angle. Untested against real Gemini.
 - Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".
+- Notes, diagrams and graphs have a **Change** button when selected: it reopens the prompt box ("What should change?"), sends the current card plus the edit to `/api/create` (`previous`), and replaces the card in place (one undo step).
+- An empty board shows a first-run hint ("Draw or write anything") with Make a diagram / See examples.
 - Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable. Notes, diagrams and graphs also have a corner handle to resize (one undo step).
 - `/examples` page with ready-made example boards (math, follow-ups, check my work, missing angle, word problem, fill the gap, explain, diagram, practice blanks, graph, photo); each opens as a new board via `/?example=<id>`.
 - Boards, settings, and handwriting glyphs persisted in localStorage.

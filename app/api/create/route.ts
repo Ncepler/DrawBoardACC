@@ -76,6 +76,10 @@ const SCHEMA = {
   required: ["type", "title", "text", "layout", "nodes", "edges", "xmin", "xmax", "ymin", "ymax", "curves", "points"],
 }
 
+const REVISE = `
+
+If the request starts with "Revise:", it comes with the current card as JSON and a change the student wants. Return the FULL updated card in the same type (unless the change clearly asks for another type), keeping everything the student did not ask to change. Do not restart from scratch.`
+
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "")
 
 function sanitize(raw: unknown): CardPayload | null {
@@ -142,12 +146,18 @@ export async function POST(req: Request) {
   const mime = body.image === undefined ? null : imageType(body.image)
   if (body.image !== undefined && !mime) return json({ error: "bad_image" }, 400)
   if (!prompt && !mime) return json({ error: "bad_request" }, 400)
+  // Editing an existing card: the current card goes along so the model changes it instead of starting over.
+  const prev = body.previous === undefined ? "" : JSON.stringify(body.previous)
+  if (prev.length > 8000) return json({ error: "bad_request" }, 400)
+  const text = prev
+    ? `Revise: ${prompt || "improve it"}\n\nCurrent card (JSON):\n${prev}`
+    : prompt || "Turn this photo into a clear diagram for my whiteboard."
   try {
     const raw = await generateJson({
-      system: INSTRUCTION,
+      system: prev ? INSTRUCTION + REVISE : INSTRUCTION,
       parts: [
         ...(mime ? [{ inlineData: { mimeType: mime, data: body.image as string } }] : []),
-        { text: prompt || "Turn this photo into a clear diagram for my whiteboard." },
+        { text },
       ],
       schema: SCHEMA,
       signal: req.signal,
