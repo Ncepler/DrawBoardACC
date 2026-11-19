@@ -11,8 +11,8 @@ export type Stroke = {
   createdAt: number
 }
 
-/** math = a computed result, term = a short name, explain = a few sentences, check = verdict on the student's own answer */
-export type AnswerKind = "math" | "term" | "explain" | "check"
+/** math = a computed result, term = a short name, explain = a few sentences, check = verdict on the student's own answer, circle = a ring drawn around the right multiple-choice option */
+export type AnswerKind = "math" | "term" | "explain" | "check" | "circle"
 
 export type Answer = {
   id: string

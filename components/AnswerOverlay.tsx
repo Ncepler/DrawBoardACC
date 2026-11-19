@@ -213,6 +213,7 @@ export function makeDefaultRenderer(set: GlyphSet, color: string, handwriting = 
   const ink = makeInkRenderer(set, color)
   const mineInk = mine ? makeInkRenderer(mine, color) : null
   const pick = (a: Answer): AnswerRenderer => {
+    if (a.kind === "circle") return circleRenderer
     const mode = answerMode(a, handwriting)
     if (mode === "text") return a.kind === "explain" ? explainAnswerRenderer : textAnswerRenderer
     if (mode === "hand") {
@@ -225,6 +226,29 @@ export function makeDefaultRenderer(set: GlyphSet, color: string, handwriting = 
     measure: (a, maxW) => pick(a).measure(a, maxW),
     renderAnswer: (a, maxW) => pick(a).renderAnswer(a, maxW),
   }
+}
+
+/** A hand-drawn-looking blue ring around the right multiple-choice option (answer.box is the option's text). */
+const circleSize = (a: Answer) => ({ w: a.box.w * 1.45 + 14, h: a.box.h * 1.45 + 12 })
+const circleRenderer: AnswerRenderer = {
+  measure: (a) => circleSize(a),
+  renderAnswer: (a) => {
+    const { w, h } = circleSize(a)
+    return (
+      <svg
+        className="absolute left-0 top-0"
+        width={w}
+        height={h}
+        viewBox={`0 0 ${w} ${h}`}
+        fill="none"
+        role="img"
+        aria-label={`Correct answer: ${a.text}`}
+        style={{ opacity: a.confidence === "low" ? 0.5 : 1, overflow: "visible" }}
+      >
+        <ellipse cx={w / 2} cy={h / 2} rx={w / 2 - 2} ry={h / 2 - 2} stroke="var(--ai)" strokeWidth="3.5" strokeLinecap="round" transform={`rotate(-2 ${w / 2} ${h / 2})`} />
+      </svg>
+    )
+  },
 }
 
 type Rect = { left: number; top: number; w: number; h: number }
@@ -246,6 +270,11 @@ export function placeAnswers(answers: Answer[], cards: Card[], maxW: number, ren
       continue
     }
     const { x, y, w: bw, h: bh } = a.box
+    if (a.kind === "circle") {
+      // the ring sits right on the option; it doesn't need free space
+      out.set(a.id, { left: x + bw / 2 - w / 2, top: y + bh / 2 - H / 2, w, h: H })
+      continue
+    }
     const midY = y + bh / 2 - H / 2
     const candidates: Rect[] = [
       { left: x + bw + GAP, top: midY, w, h: H },
@@ -442,6 +471,27 @@ export default function AnswerOverlay({
             handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : c.type === "graph" ? GRAPH_HANDLE * c.scale : undefined}
           >
             {c.type === "note" ? <NoteCard card={c} /> : c.type === "graph" ? <GraphCard card={c} dark={dark} /> : <DiagramCard card={c} dark={dark} />}
+            {!sel && (
+              <button
+                type="button"
+                aria-label="Change this with a prompt"
+                title="Change"
+                className="pointer-events-auto absolute flex h-11 w-11 items-center justify-center [touch-action:manipulation]"
+                style={{ right: -26, top: -26, transform: `scale(${1 / scale})` }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onEditCard(c.id)
+                }}
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#007AFF] text-white shadow">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 20l4.5-1 10-10a2.1 2.1 0 00-3-3l-10 10L4 20z" />
+                  </svg>
+                </span>
+              </button>
+            )}
             {(sel || (c.type === "diagram" && c.diagram.nodes.some((n) => n.blank && n.fill))) && (
               <div
                 className="pointer-events-auto absolute left-0 flex gap-2"
@@ -494,7 +544,7 @@ export default function AnswerOverlay({
             onSelect={() => onSelect(sel ? null : { type: "answer", id: a.id })}
             onMove={(x, y) => onMoveAnswer(a.id, x, y)}
             onDelete={() => onDelete({ type: "answer", id: a.id })}
-            actions={
+            actions={a.kind === "circle" ? undefined : (
               <button
                 type="button"
                 aria-label={answerMode(a, handwriting) === "text" ? "Show in handwriting" : "Show as typed text"}
@@ -515,7 +565,7 @@ export default function AnswerOverlay({
                   )}
                 </span>
               </button>
-            }
+            )}
           >
             {renderer.renderAnswer(a, maxW)}
           </Draggable>

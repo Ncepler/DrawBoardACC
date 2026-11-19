@@ -5,7 +5,7 @@ import type { AnswerKind } from "@/lib/types"
 
 export const maxDuration = 30
 
-const MAX_ITEMS = 10
+const MAX_ITEMS = 30
 
 const INSTRUCTION = `You are a study assistant looking at a student's whiteboard. Black ink and black typed text are the student's. Gray printed diagrams are practice sheets the app placed there. BLUE text is an answer the app already gave earlier: treat it as part of the board, never re-answer it, and never answer something that already has a blue answer next to it.
 
@@ -18,6 +18,11 @@ Respond to, with the matching "kind":
 - "explain": the student asks to explain or describe something, or writes a topic followed by "?" or ":?" ("Krebs cycle:?", "Explain civil war", "what is osmosis"). Also any command that wants text back: define, list, summarize, translate, convert units, compare, write a sentence or short poem, name steps. Do what the command says in at most 60 words.
 - "term": a blank, empty box, or "?" in a diagram or sentence where a name or value goes. Name what belongs there using the surrounding labels, arrows, and structure.
 - "check": the student wrote their own answer and it is WRONG ("7x8=54"), or the student filled a blank in a gray practice diagram. For wrong work answer "✗ " plus the correct answer. For a correctly filled practice blank answer "✓". For a wrong practice blank answer "✗ " plus the correct term. Do not mark correct work outside practice diagrams.
+- "circle": a MULTIPLE-CHOICE question (options like a) b) c) d) or A B C D, typed, printed, or in a pasted/imported document). Work out which option is correct, then give "box" = the tight box around THAT option's own text (its letter and its text, for example "c) 1/36"), and "answer" = that option's letter and text. The student's black pen circles, checks and crosses are THEIR marks, not yours.
+  - If the student has marked one option (circled, checked, underlined) and it is CORRECT: respond with nothing for that question.
+  - If the student has marked one option and it is WRONG: respond with a "circle" item on the correct option.
+  - If the student has marked nothing: do NOT circle unless the student wrote a command such as "answer all these", "answer these", "solve these" or "do these". Then give one "circle" item for EVERY multiple-choice question on the board.
+  Work each question out carefully, including word problems and any shared setup text above the questions. If you are not sure, use low confidence.
 - "create": the student commands you to MAKE a visual: a diagram, flowchart, cycle, chart, graph, labeled figure, or a notes card ("write out a diagram for the photosynthesis equation", "draw the water cycle", "make notes on mitosis", "graph it", "plot y = x² − 4"). For "graph it" or "plot this", put the equation to graph in the request ("graph of y = x² − 4, a parabola") using the equation written nearby on the board. Put the request in "answer" as a clear instruction (for example "diagram of the photosynthesis equation: inputs and outputs"). Fix obvious typos. If the student asks for blanks or practice, keep that in the request.
 
 Do NOT respond to: work that is already correct and complete, titles, headings, plain notes, labels that are filled in, doodles, blue answers, or the gray practice diagram's own empty blanks. If you are not sure the student wants a response, skip it. Never respond to the same thing twice.
@@ -28,6 +33,7 @@ Answer format:
 - "term": at most 6 words, a term or short phrase, never a sentence.
 - "explain": at most 60 words, accurate and at a high school level.
 - "check": at most 8 words.
+- "circle": the option letter and text, at most 6 words.
 - "create": the instruction, at most 40 words.
 
 For each item:
@@ -46,7 +52,7 @@ const RESPONSE_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          kind: { type: "string", enum: ["math", "term", "explain", "check", "create"] },
+          kind: { type: "string", enum: ["math", "term", "explain", "check", "circle", "create"] },
           reading: { type: "string" },
           box: { type: "array", items: { type: "number" }, minItems: 4, maxItems: 4 },
           answer: { type: "string" },
@@ -59,7 +65,7 @@ const RESPONSE_SCHEMA = {
   required: ["found", "items"],
 }
 
-const KINDS: AnswerKind[] = ["math", "term", "explain", "check"]
+const KINDS: AnswerKind[] = ["math", "term", "explain", "check", "circle"]
 
 function sanitize(raw: unknown) {
   const items: { kind: AnswerKind | "create"; reading: string; box: number[]; answer: string; confidence: "high" | "low" }[] = []
