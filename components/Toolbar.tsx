@@ -3,7 +3,7 @@
 export type Tool = "pen" | "eraser" | "text" | "ask" | "hand" | "shape"
 
 const btn =
-  "flex h-11 w-11 items-center justify-center rounded-full transition-colors duration-150 [touch-action:manipulation] disabled:opacity-30"
+  "flex h-11 w-11 items-center justify-center rounded-full transition duration-150 active:scale-95 [touch-action:manipulation] disabled:opacity-30"
 
 const icon = {
   width: 22,
@@ -19,6 +19,7 @@ const icon = {
 export default function Toolbar({
   tool,
   onTool,
+  onPenAgain,
   canUndo,
   onUndo,
   canRedo,
@@ -32,6 +33,7 @@ export default function Toolbar({
 }: {
   tool: Tool
   onTool: (t: Tool) => void
+  onPenAgain: () => void
   canUndo: boolean
   onUndo: () => void
   canRedo: boolean
@@ -52,7 +54,7 @@ export default function Toolbar({
       role="toolbar"
       aria-label="Drawing tools"
     >
-      <button type="button" aria-label="Pen" aria-pressed={tool === "pen"} className={`${btn} ${tool === "pen" ? active : idle}`} onClick={() => onTool("pen")}>
+      <button type="button" aria-label="Pen" aria-pressed={tool === "pen"} className={`${btn} ${tool === "pen" ? active : idle}`} onClick={() => (tool === "pen" ? onPenAgain() : onTool("pen"))}>
         <svg {...icon}>
           <path d="M4 20l4.5-1 10-10a2.1 2.1 0 00-3-3l-10 10L4 20z" />
           <path d="M13.5 7.5l3 3" />

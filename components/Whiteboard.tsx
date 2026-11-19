@@ -6,6 +6,7 @@ import AnswerOverlay, { answerMode, makeDefaultRenderer, placeAnswers, type Answ
 import Composer from "./Composer"
 import PhotoChoice from "./PhotoChoice"
 import ShapePicker from "./ShapePicker"
+import PenTray from "./PenTray"
 import InlineEditor from "./InlineEditor"
 import HandwritingSetup from "./HandwritingSetup"
 import SettingsPanel from "./SettingsPanel"
@@ -16,9 +17,10 @@ import { cardSize, fitScale, naturalSize } from "@/lib/cards"
 import { isCorrect } from "@/lib/check"
 import { BLANK_H, BLANK_W, layoutDiagram } from "@/lib/diagram"
 import { TEXT_PAD, TEXT_SIZE, textBoxSize } from "@/lib/texts"
-import { ERASER_RADIUS, IDLE_MOVE_PX, IDLE_MS, INK_COLOR, PEN_REJECT_MS } from "@/lib/config"
+import { ERASER_RADIUS, IDLE_MOVE_PX, IDLE_MS, INK_COLOR, PEN_REJECT_MS, SNAP_HOLD_MS, SNAP_JITTER_PX, TAP_MAX_MOVE_PX, TAP_MAX_MS } from "@/lib/config"
+import { recognizeShape, type Snapped } from "@/lib/snap"
 import { EXAMPLES, buildExample } from "@/lib/examples"
-import { pathExtent, shapePath, shapeStroke, SHAPE_WIDTH, type ShapeKind } from "@/lib/shapes"
+import { densify, pathExtent, shapePath, shapeStroke, SHAPE_WIDTH, type ShapeKind } from "@/lib/shapes"
 import { drawStroke, segmentHitsStroke, strokePath } from "@/lib/ink"
 import { failureText, photoToJpeg } from "@/lib/photo"
 import {
@@ -72,6 +74,9 @@ type Drawing = {
   lastY: number
   touch: boolean
   start?: Point // where a shape drag began
+  anchor?: { x: number; y: number } // where the pen last moved, for hold-to-snap
+  hold?: ReturnType<typeof setTimeout>
+  snap?: Snapped // set once a held stroke has snapped to a clean shape
 }
 
 const MAX_BUFFER_PIXELS = 16_000_000
@@ -185,9 +190,13 @@ export default function Whiteboard() {
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
+  const canUndoRef = useRef(false)
+  const canRedoRef = useRef(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [selected, setSelected] = useState<Selection>(null)
+  const [penTray, setPenTray] = useState(false)
+  const tapTrack = useRef<{ t0: number; max: number; moved: boolean; start: Map<number, { x: number; y: number }> } | null>(null)
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle")
   const shapeRef = useRef<ShapeKind>("rectangle")
   const [composer, setComposer] = useState<ComposerState | null>(null)
@@ -251,8 +260,10 @@ export default function Whiteboard() {
 
   const syncUndo = useCallback(() => {
     const s = stateRef.current
-    setCanUndo(!!s && (undoStacks.current.get(s.activeBoardId)?.length ?? 0) > 0)
-    setCanRedo(!!s && (redoStacks.current.get(s.activeBoardId)?.length ?? 0) > 0)
+    canUndoRef.current = !!s && (undoStacks.current.get(s.activeBoardId)?.length ?? 0) > 0
+    canRedoRef.current = !!s && (redoStacks.current.get(s.activeBoardId)?.length ?? 0) > 0
+    setCanUndo(canUndoRef.current)
+    setCanRedo(canRedoRef.current)
   }, [])
 
   // ---------- canvas rendering ----------
@@ -485,6 +496,7 @@ export default function Whiteboard() {
 
   // Keyboard: Enter analyzes, Delete removes the selected item, Escape deselects.
   // Ignored while typing in the Ask box.
+  const historyRef = useRef<{ undo: () => void; redo: () => void }>({ undo: () => {}, redo: () => {} })
   const deleteRef = useRef<(s: NonNullable<Selection>) => void>(() => {})
   const selectedRef = useRef<Selection>(null)
   useEffect(() => {
@@ -700,6 +712,7 @@ export default function Whiteboard() {
   }
 
   const cancelDrawing = () => {
+    if (drawing.current?.hold) clearTimeout(drawing.current.hold)
     drawing.current = null
     clearLive()
   }
@@ -763,6 +776,42 @@ export default function Whiteboard() {
     return null
   }
 
+  /** Hold-to-snap: after SNAP_HOLD_MS of stillness a rough line, circle, oval, triangle or box becomes a clean one. */
+  const armHold = (d: Drawing) => {
+    if (d.hold) clearTimeout(d.hold)
+    if (!settingsRef.current.snapShapes) return
+    d.hold = setTimeout(() => {
+      if (drawing.current !== d || !d.stroke || d.snap) return
+      const r = recognizeShape(d.stroke.points)
+      if (!r) return
+      d.snap = r
+      d.stroke = {
+        ...d.stroke,
+        shape: true,
+        real: false,
+        width: Math.max(2.5, d.stroke.width * 0.7),
+        points: r.pts.map(([x, y], i) => ({ x, y, p: 0.5, t: i })),
+      }
+      d.predicted = []
+      navigator.vibrate?.(8)
+      scheduleLive()
+    }, SNAP_HOLD_MS)
+  }
+
+  /** Two quick fingers = undo, three = redo (Notability's gestures). Called when the last finger lifts. */
+  const finishTapGesture = (now: number) => {
+    const t = tapTrack.current
+    tapTrack.current = null
+    if (!t || t.moved || now - t.t0 > TAP_MAX_MS) return
+    if (t.max === 2 && canUndoRef.current) {
+      historyRef.current.undo()
+      flash("Undo", 900)
+    } else if (t.max === 3 && canRedoRef.current) {
+      historyRef.current.redo()
+      flash("Redo", 900)
+    }
+  }
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return
     const board = activeBoard()
@@ -818,6 +867,9 @@ export default function Whiteboard() {
       touches.current.add(e.pointerId)
       touchPos.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       if (penDown.current || now < penUntil.current) return // palm rejection
+      const tt = (tapTrack.current ??= { t0: e.timeStamp, max: 0, moved: false, start: new Map() })
+      tt.start.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      tt.max = Math.max(tt.max, touches.current.size)
       if (touches.current.size > 1) {
         if (drawing.current?.touch) cancelDrawing() // two fingers: pan and pinch-zoom, not a stroke
         beginGesture()
@@ -846,7 +898,7 @@ export default function Whiteboard() {
         id: crypto.randomUUID(),
         points: [pt],
         tool: "pen",
-        width: isPen ? 6 : 5,
+        width: isPen ? settingsRef.current.penSize : Math.max(2, settingsRef.current.penSize * 0.85),
         color: INK_COLOR,
         real: isPen,
         createdAt: Date.now(),
@@ -857,6 +909,10 @@ export default function Whiteboard() {
       d.stroke = { ...shapeStroke([[pt.x, pt.y]]), width: SHAPE_WIDTH }
     }
     drawing.current = d
+    if (d.tool === "pen") {
+      d.anchor = { x: pt.x, y: pt.y }
+      armHold(d)
+    }
     if (d.tool === "eraser") eraseAt(d, pt.x, pt.y, pt.x, pt.y)
     else scheduleLive()
   }
@@ -882,9 +938,20 @@ export default function Whiteboard() {
         return
       }
     }
+    const tt = tapTrack.current?.start.get(e.pointerId)
+    if (tt && Math.hypot(e.clientX - tt.x, e.clientY - tt.y) > TAP_MAX_MOVE_PX) tapTrack.current!.moved = true
     const d = drawing.current
     if (!d || d.pointerId !== e.pointerId) return
     const rect = e.currentTarget.getBoundingClientRect()
+    if (d.snap) {
+      // Snapped: a line keeps following the pen (drag the end where you want it); other shapes stay put.
+      if (d.snap.kind === "line" && d.snap.a && d.stroke) {
+        const pt = pointOf(e, rect, false)
+        d.stroke.points = densify([[d.snap.a.x, d.snap.a.y], [pt.x, pt.y]]).map(([x, y], i) => ({ x, y, p: 0.5, t: i }))
+        scheduleLive()
+      }
+      return
+    }
     const native = e.nativeEvent
     const events = typeof native.getCoalescedEvents === "function" ? native.getCoalescedEvents() : []
     const list = events.length ? events : [native]
@@ -901,6 +968,13 @@ export default function Whiteboard() {
         const last = d.stroke.points[d.stroke.points.length - 1]
         if (last.x === pt.x && last.y === pt.y) continue
         d.stroke.points.push(pt)
+      }
+    }
+    if (d.tool === "pen" && d.anchor) {
+      const lp = d.stroke?.points[d.stroke.points.length - 1]
+      if (lp && Math.hypot(lp.x - d.anchor.x, lp.y - d.anchor.y) * viewRef.current.k > SNAP_JITTER_PX) {
+        d.anchor = { x: lp.x, y: lp.y }
+        armHold(d)
       }
     }
     if (d.stroke && d.tool === "shape") scheduleLive()
@@ -927,6 +1001,8 @@ export default function Whiteboard() {
     }
     touches.current.delete(e.pointerId)
     touchPos.current.delete(e.pointerId)
+    if (e.pointerType === "touch" && touches.current.size === 0 && e.type === "pointerup") finishTapGesture(e.timeStamp)
+    else if (touches.current.size === 0) tapTrack.current = null
     if (gesture.current?.ids.includes(e.pointerId)) gesture.current = null
     if (panDrag.current?.pointerId === e.pointerId) {
       panDrag.current = null
@@ -951,6 +1027,7 @@ export default function Whiteboard() {
     }
     const d = drawing.current
     if (!d || d.pointerId !== e.pointerId) return
+    if (d.hold) clearTimeout(d.hold)
     drawing.current = null
     const board = activeBoard()
     if (!board) return
@@ -1158,6 +1235,7 @@ export default function Whiteboard() {
   }
   useEffect(() => {
     deleteRef.current = deleteItem
+    historyRef.current = { undo, redo }
   })
 
   const moveCard = (id: string, x: number, y: number) => {
@@ -1428,6 +1506,7 @@ export default function Whiteboard() {
     idleTimer.current = null
     toolRef.current = t
     setTool(t)
+    setPenTray(false)
     if (t === "ask") flash("Tap where the answer should go")
     if (t === "text") flash("Click anywhere to type, or click a blank to fill it in")
     if (t === "hand") flash("Drag the board to move around")
@@ -1635,9 +1714,19 @@ export default function Whiteboard() {
           }}
         />
       )}
+      {tool === "pen" && penTray && (
+        <PenTray
+          value={settings.penSize}
+          onPick={(s) => {
+            updateSettings({ ...settingsRef.current, penSize: s })
+            setPenTray(false)
+          }}
+        />
+      )}
       <Toolbar
         tool={tool}
         onTool={changeTool}
+        onPenAgain={() => setPenTray((v) => !v)}
         canUndo={canUndo}
         onUndo={undo}
         canRedo={canRedo}

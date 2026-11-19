@@ -94,6 +94,12 @@ export default function SettingsPanel({
           />
         </div>
 
+        <div className="px-4 pb-1 pt-3 text-[12px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Drawing</div>
+        <div className={row}>
+          <span>Hold to snap shapes</span>
+          <Switch label="Hold to snap shapes" on={settings.snapShapes} onChange={(v) => onChange({ ...settings, snapShapes: v })} />
+        </div>
+
         <div className="mx-4 my-2 border-t border-[var(--hairline)]" />
         <a href="/examples" className={`${row} text-[var(--ai)] active:bg-[var(--press)]`}>
           See examples

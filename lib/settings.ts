@@ -3,13 +3,13 @@ import type { Glyph, GlyphSet } from "./glyphs"
 import { builtinGlyphs } from "./glyphs"
 
 export type Theme = "system" | "light" | "dark"
-export type Settings = { theme: Theme; handwriting: boolean; autoAnalyze: boolean; version: 1 }
+export type Settings = { theme: Theme; handwriting: boolean; autoAnalyze: boolean; snapShapes: boolean; penSize: number; version: 1 }
 
 import { SETTINGS_KEY } from "./theme"
 export { SETTINGS_KEY }
 export const GLYPHS_KEY = "ai-whiteboard:glyphs:v1"
 
-export const DEFAULT_SETTINGS: Settings = { theme: "system", handwriting: false, autoAnalyze: false, version: 1 }
+export const DEFAULT_SETTINGS: Settings = { theme: "system", handwriting: false, autoAnalyze: false, snapShapes: true, penSize: 6, version: 1 }
 
 export function loadSettings(): Settings {
   try {

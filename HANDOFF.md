@@ -26,6 +26,8 @@ See CLAUDE.md §0–§13. In short:
 - **Settings:** light/dark, your-own-handwriting glyphs (letters, numbers, a "More symbols" tab, gray guide letters, undo), auto-analyze. Answers show exponents `^(…)` raised.
 - **Demos:** the `/examples` page (`/?example=<id>`).
 
+- **Notability-inspired drawing (this branch):** hold-to-snap shapes, pen thickness tray, 2/3-finger tap undo/redo. Verified with mouse and CDP touch events only. Untested on iPad: tune `SNAP_HOLD_MS` / `SNAP_JITTER_PX` in `lib/config.ts` (Pencil jitters while held) and check that holding mid-handwriting doesn't snap by accident (toggle is in Settings). Not taken from Notability's list: lasso, dockable toolbar, ruler, zoom window, tape.
+
 ## Testing (what works in the container)
 
 - **Build and lint:** `npm run build` and `npx eslint .` should both be clean.
