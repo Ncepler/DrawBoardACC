@@ -126,7 +126,13 @@ export async function exportBoardPng(
   }
   ctx.fillStyle = ANSWER_BLUE
   for (const a of answers) {
-    if (a.kind === "explain") {
+    if (a.kind === "circle") {
+      ctx.strokeStyle = ANSWER_BLUE
+      ctx.lineWidth = 3.5
+      ctx.beginPath()
+      ctx.ellipse(a.left + a.w / 2, a.top + a.h / 2, a.w / 2 - 2, a.h / 2 - 2, 0, 0, Math.PI * 2)
+      ctx.stroke()
+    } else if (a.kind === "explain") {
       ctx.font = `400 14px ${FONT_STACK}`
       wrapLines(a.text, 14, Math.max(40, a.w - 16)).forEach((line, i) => ctx.fillText(line, a.left + 8, a.top + 8 + i * 18))
     } else {

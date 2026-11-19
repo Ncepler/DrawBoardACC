@@ -95,6 +95,10 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Geometry: for a drawn figure with an unknown angle or length, Gemini is told to answer with the value and a tight box around that unknown label or angle mark, so the answer lands at that angle. Untested against real Gemini.
 - Notability-inspired drawing feel (`lib/snap.ts`, `components/PenTray.tsx`): **hold to snap** (hold the pen still 350 ms at the end of a stroke and a rough line, circle, oval, triangle or box becomes a clean shape; a snapped line follows the pen until lift; setting "Hold to snap shapes", on by default); **pen thickness tray** (tap the pen while it is selected: Fine 3 / Medium 6 / Bold 10 / Marker 16, saved in settings); **two-finger tap = undo, three-finger tap = redo** (quick, barely moving); toolbar buttons shrink slightly when pressed. No color picker: ink color is meaningful (black = student, blue = app). Untested on iPad.
 - Text tool: typed text on the board (counts as the student's writing) and typed answers in practice blanks, with local "Check answers".
+- **PDF / file import** (Photo button, drop): each PDF page (up to 12) is placed on the board as a sheet to write on (`lib/pdf.ts`, uses `pdfjs-dist`), same as "Draw on it" images. Analyze works on a board with only an imported page.
+- **Multiple choice:** a fifth answer kind, `circle`: Gemini returns the box of the correct option and the app draws a blue ring on it. Student's option marked and right → nothing; marked and wrong → ring the right one; nothing marked → only when the board says "answer all these". Untested against real Gemini.
+- Shapes: tap (no drag) drops a regular-size shape; the palette closes when you tap the board. Cmd/Ctrl+Z undo, Shift+Cmd+Z / Ctrl+Y redo. The first-run hint goes away on the first touch and stays gone.
+- Cards also show a small pencil at the top-right corner (always) that opens the same prompt as **Change**.
 - Notes, diagrams and graphs have a **Change** button when selected: it reopens the prompt box ("What should change?"), sends the current card plus the edit to `/api/create` (`previous`), and replaces the card in place (one undo step).
 - An empty board shows a first-run hint ("Draw or write anything") with Make a diagram / See examples.
 - Answers, notes, diagrams and typed text: tap to select, drag to move, × to delete, all undoable. Notes, diagrams and graphs also have a corner handle to resize (one undo step).
@@ -102,7 +106,7 @@ Noah's stated expectation: he assumed the software part is easy. The loop (pause
 - Boards, settings, and handwriting glyphs persisted in localStorage.
 
 ### Out of scope (do not build, do not stub)
-- Accounts/login, database, sharing, collaboration, export, color picker, shapes, images other than the photo-to-diagram flow and photos placed on the board to draw over, hardware anything.
+- Accounts/login, database, sharing, collaboration, export, color picker, hardware anything. (Images and PDFs are only for photo-to-diagram and as sheets to draw over.)
 - Any deploy or Vercel configuration changes unless Noah asks (Noah handles deploys and merges).
 
 ---

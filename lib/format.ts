@@ -64,7 +64,7 @@ export function stripMarkdown(s: string) {
 
 export const truncateWords = (text: string, max: number) => text.trim().split(/\s+/).slice(0, max).join(" ")
 
-export const KIND_LIMITS: Record<AnswerKind, number> = { math: 10, term: 6, explain: 60, check: 8 }
+export const KIND_LIMITS: Record<AnswerKind, number> = { math: 10, term: 6, explain: 60, check: 8, circle: 6 }
 
 /**
  * Final cleanup of one answer, by kind. For math: plain text (no LaTeX), and an "="

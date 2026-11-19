@@ -5,6 +5,7 @@ import { flushSync } from "react-dom"
 import AnswerOverlay, { answerMode, makeDefaultRenderer, placeAnswers, type AnswerRenderer, type Selection } from "./AnswerOverlay"
 import Composer from "./Composer"
 import PhotoChoice from "./PhotoChoice"
+import { isPdf, pdfToPages } from "@/lib/pdf"
 import ShapePicker from "./ShapePicker"
 import PenTray from "./PenTray"
 import InlineEditor from "./InlineEditor"
@@ -196,6 +197,8 @@ export default function Whiteboard() {
   const [notice, setNotice] = useState<string | null>(null)
   const [selected, setSelected] = useState<Selection>(null)
   const [penTray, setPenTray] = useState(false)
+  const [shapeOpen, setShapeOpen] = useState(false)
+  const [hintGone, setHintGone] = useState(false)
   const tapTrack = useRef<{ t0: number; max: number; moved: boolean; start: Map<number, { x: number; y: number }> } | null>(null)
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle")
   const shapeRef = useRef<ShapeKind>("rectangle")
@@ -374,7 +377,7 @@ export default function Whiteboard() {
     const board = activeBoard()
     if (!board) return
     const practice = (board.cards ?? []).some((c) => c.type === "diagram")
-    if (board.strokes.length === 0 && !practice && !(board.texts ?? []).length) {
+    if (board.strokes.length === 0 && !practice && !(board.texts ?? []).length && !(board.images ?? []).length) {
       if (manual) flash("Draw something first")
       return
     }
@@ -505,7 +508,14 @@ export default function Whiteboard() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement | null)?.closest?.("input, textarea")) return
-      if (e.key === "Enter" && !e.repeat && !drawing.current) {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "z") {
+        e.preventDefault()
+        if (e.shiftKey) historyRef.current.redo()
+        else historyRef.current.undo()
+      } else if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "y") {
+        e.preventDefault()
+        historyRef.current.redo()
+      } else if (e.key === "Enter" && !e.repeat && !drawing.current) {
         e.preventDefault()
         analyzeNow()
       } else if ((e.key === "Backspace" || e.key === "Delete") && selectedRef.current) {
@@ -820,6 +830,8 @@ export default function Whiteboard() {
     const isPen = e.pointerType === "pen"
     const isTouch = e.pointerType === "touch"
     setSelected(null)
+    setShapeOpen(false)
+    setHintGone(true)
 
     // The Move tool: any pointer (finger, pen, mouse) drags the board; a second finger pinch-zooms.
     if (toolRef.current === "hand") {
@@ -1015,7 +1027,10 @@ export default function Whiteboard() {
       // flushSync mounts the box (and its autoFocus) inside this event, so the keyboard opens.
       if (tap.tool === "text") {
         const blank = blankAt(tap.x, tap.y)
-        flushSync(() => setEditor(blank ?? { kind: "new", x: tap.x, y: tap.y }))
+        flushSync(() => {
+          setHintGone(true)
+          setEditor(blank ?? { kind: "new", x: tap.x, y: tap.y })
+        })
         return
       }
       toolRef.current = "pen"
@@ -1031,9 +1046,14 @@ export default function Whiteboard() {
     drawing.current = null
     const board = activeBoard()
     if (!board) return
-    if (d.tool === "shape" && d.stroke && pathExtent(d.stroke.points) < 8) {
-      clearLive() // a tap, not a shape
-      return
+    if (d.tool === "shape" && d.stroke && d.start && pathExtent(d.stroke.points) < 8) {
+      // A tap, not a drag: drop a regular-sized shape centered on the tap.
+      const k = shapeRef.current
+      const line = k === "line" || k === "arrow"
+      const wide = k === "rectangle" || k === "oval"
+      const hw = line ? 70 : wide ? 80 : 60
+      const hh = line ? 0 : wide ? 50 : 60
+      d.stroke.points = shapePath(k, { x: d.start.x - hw, y: d.start.y - hh }, { x: d.start.x + hw, y: d.start.y + hh }).map(([x, y], i) => ({ x, y, p: 0.5, t: i }))
     }
     if ((d.tool === "pen" || d.tool === "shape") && d.stroke) {
       const stroke = d.stroke
@@ -1350,8 +1370,40 @@ export default function Whiteboard() {
     flushSync(() => setComposer({ x: at.x, y: at.y, prompt: "", photo: null }))
   }
 
+  /** A PDF: every page goes on the board as a sheet to write on, stacked top to bottom. */
+  const addPdfToBoard = async (file: File) => {
+    const b = activeBoard()
+    if (!b) return
+    flash("Opening PDF…", 4000)
+    try {
+      const pages = await pdfToPages(file)
+      const vis = visibleRect()
+      const scale = Math.min(1, (vis.w - 48) / pages[0].w)
+      let y = vis.y + 16 / vis.k
+      const images: BoardImage[] = pages.map((p) => {
+        const im: BoardImage = {
+          id: crypto.randomUUID(),
+          pos: { x: vis.x + Math.max(8, (vis.w - p.w * scale) / 2), y },
+          w: p.w,
+          h: p.h,
+          scale,
+          src: p.dataUrl,
+          createdAt: Date.now(),
+        }
+        y += p.h * scale + 12
+        return im
+      })
+      for (const image of images) pushUndo(b.id, { type: "image-add", image })
+      patchBoard(b.id, (bd) => ({ ...bd, images: [...(bd.images ?? []), ...images] }))
+      flash(pages.length > 1 ? `Added ${pages.length} pages` : "Added 1 page")
+    } catch {
+      flash("Couldn't open that PDF")
+    }
+  }
+
   const onPhotoPicked = async (file: File | undefined) => {
     if (!file) return
+    if (isPdf(file)) return void addPdfToBoard(file)
     try {
       setPhotoChoice({ file, photo: await photoToJpeg(file) })
     } catch {
@@ -1504,9 +1556,11 @@ export default function Whiteboard() {
   const changeTool = (t: Tool) => {
     if (idleTimer.current) clearTimeout(idleTimer.current) // switching tools means you're not done
     idleTimer.current = null
+    const prev = toolRef.current
     toolRef.current = t
     setTool(t)
     setPenTray(false)
+    setShapeOpen(t === "shape" ? prev !== "shape" || !shapeOpen : false)
     if (t === "ask") flash("Tap where the answer should go")
     if (t === "text") flash("Click anywhere to type, or click a blank to fill it in")
     if (t === "hand") flash("Drag the board to move around")
@@ -1524,7 +1578,7 @@ export default function Whiteboard() {
         style={{ cursor: tool === "hand" ? "grab" : undefined }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
-          const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/"))
+          const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/") || isPdf(x))
           if (!f) return
           e.preventDefault()
           void onPhotoPicked(f)
@@ -1627,7 +1681,7 @@ export default function Whiteboard() {
       <input
         ref={photoInput}
         type="file"
-        accept="image/*"
+        accept="image/*,application/pdf,.pdf"
         className="hidden"
         onChange={(e) => {
           void onPhotoPicked(e.target.files?.[0])
@@ -1705,7 +1759,7 @@ export default function Whiteboard() {
         onSelect={selectBoard}
         onAdd={addBoard}
       />
-      {tool === "shape" && (
+      {tool === "shape" && shapeOpen && (
         <ShapePicker
           value={shapeKind}
           onPick={(k) => {
@@ -1739,7 +1793,7 @@ export default function Whiteboard() {
         onAnalyze={analyzeNow}
       />
 
-      {isBlank(board) && !composer && !editor && !pending.length && (
+      {isBlank(board) && !hintGone && !composer && !editor && !pending.length && (
         <div className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-6" style={{ top: "34%" }}>
           <div className="max-w-sm text-center text-[var(--text-muted)]">
             <div className="text-[22px] font-semibold tracking-tight text-[var(--text)]">Draw or write anything</div>
