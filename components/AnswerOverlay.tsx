@@ -355,6 +355,7 @@ export default function AnswerOverlay({
   onMoveText,
   onEditText,
   onCheck,
+  onEditCard,
   textTool,
   glyphs = builtinGlyphs,
   aiColor = "#007AFF",
@@ -385,6 +386,7 @@ export default function AnswerOverlay({
   onMoveText: (id: string, x: number, y: number) => void
   onEditText: (id: string) => void
   onCheck: (cardId: string) => void
+  onEditCard: (cardId: string) => void
   textTool: boolean
   glyphs?: GlyphSet
   aiColor?: string
@@ -440,20 +442,39 @@ export default function AnswerOverlay({
             handle={c.type === "diagram" ? DIAGRAM_HANDLE * c.scale : c.type === "graph" ? GRAPH_HANDLE * c.scale : undefined}
           >
             {c.type === "note" ? <NoteCard card={c} /> : c.type === "graph" ? <GraphCard card={c} dark={dark} /> : <DiagramCard card={c} dark={dark} />}
-            {c.type === "diagram" && c.diagram.nodes.some((n) => n.blank && n.fill) && (
-              <button
-                type="button"
-                className="pointer-events-auto absolute left-0 flex h-11 items-center rounded-full bg-[#007AFF] px-4 text-[15px] font-medium text-white shadow [touch-action:manipulation] active:opacity-80"
+            {(sel || (c.type === "diagram" && c.diagram.nodes.some((n) => n.blank && n.fill))) && (
+              <div
+                className="pointer-events-auto absolute left-0 flex gap-2"
                 style={{ top: h + 8, transform: `scale(${1 / scale})`, transformOrigin: "0 0" }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onPointerUp={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onCheck(c.id)
-                }}
               >
-                Check answers
-              </button>
+                {sel && <button
+                  type="button"
+                  className="flex h-11 items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--chrome-strong)] px-4 text-[15px] font-medium text-[#007AFF] shadow backdrop-blur-xl [touch-action:manipulation] active:opacity-80"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onEditCard(c.id)
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 20l4.5-1 10-10a2.1 2.1 0 00-3-3l-10 10L4 20z" />
+                  </svg>
+                  Change
+                </button>}
+                {c.type === "diagram" && c.diagram.nodes.some((n) => n.blank && n.fill) && (
+                  <button
+                    type="button"
+                    className="h-11 rounded-full bg-[#007AFF] px-4 text-[15px] font-medium text-white shadow [touch-action:manipulation] active:opacity-80"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onCheck(c.id)
+                    }}
+                  >
+                    Check answers
+                  </button>
+                )}
+              </div>
             )}
           </Draggable>
         )

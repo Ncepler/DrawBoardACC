@@ -14,6 +14,7 @@ export default function Composer({
   bounds,
   initialPrompt,
   photo,
+  editing,
   onSubmit,
   onCancel,
 }: {
@@ -22,6 +23,8 @@ export default function Composer({
   bounds: { w: number; h: number }
   initialPrompt: string
   photo: string | null // data URL preview
+  /** Set when changing an existing card: the box asks what to change instead of what to make. */
+  editing?: "diagram" | "note" | "graph"
   onSubmit: (prompt: string) => void
   onCancel: () => void
 }) {
@@ -29,7 +32,7 @@ export default function Composer({
   const ref = useRef<HTMLTextAreaElement>(null)
   const w = Math.min(W, bounds.w - 24)
   const left = Math.min(Math.max(12, x), Math.max(12, bounds.w - w - 12))
-  const top = Math.min(Math.max(12, y), Math.max(12, bounds.h - (photo ? 260 : 180)))
+  const top = Math.min(Math.max(12, y), Math.max(12, bounds.h - (photo && !editing ? 260 : 200)))
 
   useEffect(() => {
     const el = ref.current
@@ -38,7 +41,7 @@ export default function Composer({
     el.setSelectionRange(el.value.length, el.value.length)
   }, [])
 
-  const canSend = text.trim().length > 0 || !!photo
+  const canSend = text.trim().length > 0 || (!!photo && !editing)
   const send = () => canSend && onSubmit(text.trim())
 
   return (
@@ -47,7 +50,10 @@ export default function Composer({
       style={{ left, top, width: w }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {photo && (
+      {editing && (
+        <div className="px-2 pt-1 text-[13px] font-medium text-[var(--text-muted)]">What should change in this {editing}?</div>
+      )}
+      {!editing && photo && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={photo} alt="Attached photo" className="mb-2 max-h-24 rounded-lg object-contain" />
       )}
@@ -66,7 +72,7 @@ export default function Composer({
             onCancel()
           }
         }}
-        placeholder={photo ? "What should I make from this photo?" : "Ask anything, e.g. “Diagram of photosynthesis”"}
+        placeholder={editing ? "e.g. “add a step for glycolysis” or “make it simpler”" : photo ? "What should I make from this photo?" : "Ask anything, e.g. “Diagram of photosynthesis”"}
         className="block w-full resize-none rounded-xl bg-transparent px-2 py-1.5 text-[16px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] select-text"
         style={{ WebkitUserSelect: "text", userSelect: "text" }}
       />
@@ -84,7 +90,7 @@ export default function Composer({
           disabled={!canSend}
           className="h-11 rounded-full bg-[#007AFF] px-5 text-[15px] font-medium text-white [touch-action:manipulation] active:opacity-80 disabled:opacity-40"
         >
-          Create
+          {editing ? "Update" : "Create"}
         </button>
       </div>
     </div>
